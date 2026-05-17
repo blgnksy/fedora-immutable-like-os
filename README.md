@@ -1568,19 +1568,19 @@ The ublue-os tap is additive — your normal `brew install <thing>` keeps workin
 
 ```
 ┌──────────────────────────────────────────────────┐
-│              GUI Apps (Flatpak/Flathub)           │
+│            GUI Apps (Flatpak/Flathub)            │
 ├──────────────────────────────────────────────────┤
-│         CLI Tools (Homebrew in ~/linuxbrew)       │
+│        CLI Tools (Homebrew in ~/linuxbrew)       │
 ├──────────────────────────────────────────────────┤
-│      Dev Environments (Distrobox / Toolbox)       │
+│      Dev Environments (Distrobox / Toolbox)      │
 ├──────────────────────────────────────────────────┤
-│     GPU Workloads (Podman + CDI nvidia.com/gpu)   │
+│    GPU Workloads (Podman + CDI nvidia.com/gpu)   │
 ├──────────────────────────────────────────────────┤
-│  Btrfs Snapshots (Snapper — auto pre/post DNF)   │
+│   Btrfs Snapshots (Snapper — auto pre/post DNF)  │
 ├──────────────────────────────────────────────────┤
-│          Fedora KDE 44 Host (minimal dnf)         │
-│  NVIDIA 580xx · Podman · CDI · Snapper            │
-│  (Distrobox via Homebrew, not host dnf)           │
+│         Fedora KDE 44 Host (minimal dnf)         │
+│       NVIDIA 580xx · Podman · CDI · Snapper      │
+│      (Distrobox via Homebrew, not host dnf)      │
 └──────────────────────────────────────────────────┘
 ```
 
