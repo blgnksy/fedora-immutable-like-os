@@ -12,6 +12,6 @@ maxretry = 5
 findtime = 10m
 bantime = 1h
 EOF
-systemctl enable --now fail2ban
+sudo systemctl enable --now fail2ban
 fail2ban-client status
 fail2ban-client status sshd

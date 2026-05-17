@@ -4,9 +4,9 @@ set -euo pipefail
 source "$(dirname "$0")/common.sh"
 
 rpm -q openssh-server >/dev/null 2>&1 || dnf_cmd install -y openssh-server
-systemctl enable --now sshd
-firewall-cmd --permanent --add-service=ssh
-firewall-cmd --reload
+sudo systemctl enable --now sshd
+sudo firewall-cmd --permanent --add-service=ssh
+sudo firewall-cmd --reload
 
 sudo install -d -m 0755 /etc/ssh/sshd_config.d
 sudo tee /etc/ssh/sshd_config.d/00-hardening.conf > /dev/null << 'EOF'

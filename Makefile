@@ -27,7 +27,7 @@ BREW := $(shell test -x /home/linuxbrew/.linuxbrew/bin/brew && echo /home/linuxb
 	phase4-crypto phase4-okular phase4-smartcard \
 	phase5-distrobox-config phase5-distrobox-dev phase5-distrobox-deepstream \
 	phase6-dnf-automatic phase6-nvidia-versionlock phase6-dnf-guard \
-	phase7-brewfile-dump \
+	phase7-brewfile-dump phase7-all phase7-host-setup phase7-verify \
 	update update-host health status clean mounts \
 	snapper-list snapper-cleanup snapper-undo snapper-timers \
 	refresh-gpu gpu-test flatpak-update brew-update distrobox-update podman-prune
@@ -89,6 +89,15 @@ help-setup: ## Show one-time setup targets (phases 0–7)
 	@echo "  phase6-dnf-automatic   security updates timer"
 	@echo "  phase6-dnf-guard       /usr/local/bin/dnf wrapper"
 	@echo "  phase6-nvidia-versionlock"
+	@echo ""
+	@echo "=== Phase 7 (dotfiles) ==="
+	@echo "  phase7-all             brewfile-dump + validate host-setup.sh"
+	@echo "  phase7-brewfile-dump   save ~/Brewfile"
+	@echo "  phase7-host-setup      make scripts/host-setup.sh executable"
+	@echo "  (manual: chezmoi init — interactive)"
+	@echo ""
+	@echo "=== Orchestration ==="
+	@echo "  scripts/host-setup.sh  run all phases 1–6 in one shot (supports --from <phase>)"
 	@echo ""
 	@echo "Skipped (manual only): ISO install, reboot, ssh-copy-id, chsh,"
 	@echo "  Homebrew install, oh-my-zsh, GPG keygen, VS Code sync, PDF sign in Okular"
@@ -317,9 +326,20 @@ phase6-dnf-guard: ## /usr/local/bin/dnf guard + dnf-host
 
 # --- Phase 7 ---
 
-phase7-brewfile-dump: ## Dump Brewfile
+phase7-all: phase7-brewfile-dump phase7-host-setup ## Brewfile dump + validate host-setup.sh
+
+phase7-brewfile-dump: ## Dump ~/Brewfile
 	@command -v brew >/dev/null
 	brew bundle dump --file=$(HOME)/Brewfile --force
+
+phase7-host-setup: ## Make scripts/host-setup.sh executable
+	chmod +x $(SCRIPTS)/host-setup.sh
+	@echo "host-setup.sh: $(SCRIPTS)/host-setup.sh"
+	@echo "Fresh install  : bash $(SCRIPTS)/host-setup.sh"
+	@echo "Resume at phase: bash $(SCRIPTS)/host-setup.sh --from <phase>"
+
+phase7-verify: ## Verify Phase 7 artifacts (Brewfile, host-setup.sh)
+	bash $(SCRIPTS)/verify.sh phase7
 
 # --- Day-2 maintenance ---
 

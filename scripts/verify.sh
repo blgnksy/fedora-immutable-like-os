@@ -129,6 +129,13 @@ phase6() {
   check_warn "NVIDIA versionlock" bash -c 'dnf versionlock list 2>/dev/null | grep -qi nvidia'
 }
 
+phase7() {
+  section "Phase 7 — dotfiles & reproducibility"
+  check_warn "Brewfile exists" test -f "${SETUP_HOME}/Brewfile"
+  check_warn "chezmoi installed" command -v chezmoi
+  check_warn "host-setup.sh executable" test -x "$(dirname "${BASH_SOURCE[0]}")/host-setup.sh"
+}
+
 phase_all() {
   phase0
   phase1
@@ -138,6 +145,7 @@ phase_all() {
   phase4
   phase5
   phase6
+  phase7
 }
 
 main() {
@@ -152,10 +160,11 @@ main() {
     phase4|4) phase4 ;;
     phase5|5) phase5 ;;
     phase6|6) phase6 ;;
+    phase7|7) phase7 ;;
     all) phase_all ;;
     *)
       echo "Unknown phase: $target"
-      echo "Use: phase0 phase1 phase1-gpu phase2 phase3 phase4 phase5 phase6 all"
+      echo "Use: phase0 phase1 phase1-gpu phase2 phase3 phase4 phase5 phase6 phase7 all"
       exit 2
       ;;
   esac

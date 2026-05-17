@@ -15,7 +15,7 @@ sed -i \
   -e 's|^#GRUB_BTRFS_MKCONFIG=.*|GRUB_BTRFS_MKCONFIG=/usr/bin/grub2-mkconfig|' \
   -e 's|^#GRUB_BTRFS_SCRIPT_CHECK=.*|GRUB_BTRFS_SCRIPT_CHECK=grub2-script-check|' \
   config
-make install
-systemctl enable --now grub-btrfsd.service
-grub2-mkconfig -o /boot/grub2/grub.cfg
+sudo make install
+sudo systemctl enable --now grub-btrfsd.service
+sudo grub2-mkconfig -o /boot/grub2/grub.cfg
 echo "grub-btrfsd installed."

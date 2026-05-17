@@ -1,8 +1,54 @@
-# Fedora KDE 44 — "Immutable-Like" Developer Workstation Setup
+# Fedora KDE Plasma Desktop 44 — "Immutable-Like" Developer Workstation Setup
 
-> **Goal:** Fedora KDE Workstation with GTX 1070 (Pascal), behaving as close to an atomic/immutable OS as possible. Minimize *ongoing* `dnf` usage on the host after initial setup. Use Homebrew for CLI tools, Flatpak for GUI apps, Distrobox/Toolbox for dev environments, and Btrfs snapshots for rollback safety.
+> **Goal:** Fedora KDE Plasma Desktop with Nvidia GPU (GTX 1070), behaving as close to an atomic/immutable OS as possible. Minimize *ongoing* `dnf` usage on the host after initial setup. Use Homebrew for CLI tools, Flatpak for GUI apps, Distrobox/Toolbox for dev environments and for some application that no need to be installed on host directly (keep this state for clean/reproducible OS setup), and Btrfs snapshots for rollback safety.
 >
-> **Mental model:** This is a **snapshot-backed minimal host**, not a true immutable OS (Silverblue/Kinoite). Phase 1 is intentionally a large one-time `dnf` wave (drivers, codecs, Podman). Phases 3–5 add user-space layers (Homebrew CLI including Distrobox, Flatpak, containers); Phase 6 locks the host down.
+> **Mental model:** This is a **snapshot-backed minimal host**, not a true immutable OS (Silverblue/Kinoite). Phase 1 is intentionally a large one-time `dnf` wave (drivers, codecs, Podman). Phases 3–5 add user-space layers (Homebrew CLI including Distrobox, Flatpak, containers); Phase 6 locks the host down. Phase 7 finalizes reproducibility: Brewfile dump, chezmoi dotfiles, and the `host-setup.sh` orchestration script.
+
+---
+
+## Why This Approach?
+
+### Why not Silverblue or Kinoite?
+
+Fedora Kinoite (the KDE variant of Silverblue) is a genuine atomic OS — the root filesystem is read-only, managed by `rpm-ostree`. It's excellent for stability but comes with trade-offs for a developer workstation:
+
+- **NVIDIA legacy drivers are hard to pin.** `rpm-ostree` layering works for NVIDIA, but older GPUs (Pascal, Turing) that need the 580xx branch can break after OS rebases. Driver pinning is opaque compared to DNF versionlock.
+- **Flexibility is limited.** Every host package goes through `rpm-ostree install` (which layers on the base image) or a container. Custom COPRs, one-off RPMs, and debugging tools that need kernel headers become awkward.
+- **The immutability benefit is mostly irrelevant for a single personal machine.** The real value of immutable OSes is fleet consistency and atomic OS-level rollback — on a personal workstation, Snapper gives you per-transaction rollback that's arguably more granular.
+- **Tooling is the same either way.** Distrobox, Podman, Flatpak, and Homebrew work identically on Kinoite and on this setup. You don't lose any of the layered model by staying on Workstation.
+
+The conclusion: if you have a modern, well-supported GPU and don't need COPR packages, Kinoite is an excellent choice. If you have a legacy GPU, need specific host packages, or want a more familiar setup path, the immutable-*like* approach here gives you 90% of the benefits with far less friction.
+
+### Why Fedora KDE Workstation?
+
+- **Current packages.** Fedora ships recent kernel, systemd, and Mesa versions — important for GPU driver compatibility and modern container tooling (Podman, CDI, Netavark).
+- **Btrfs by default.** Anaconda creates Btrfs with `root` and `home` subvolumes out of the box, giving you Snapper-compatible layout with no manual partitioning work.
+- **DNF5 + RPM Fusion.** DNF5 (Fedora 41+) is significantly faster than DNF4. Combined with RPM Fusion's broad package set, the host package story is solid for a one-time-setup model.
+- **SELinux enforcing by default.** Strong security posture without sacrificing usability.
+- **KDE Plasma** is highly configurable, resource-efficient, and works well with NVIDIA on both X11 and Wayland. Compared to GNOME, it requires no extensions to be fully functional.
+- **Immutable-first tooling is well-tested here.** Because Fedora is home to Silverblue/Kinoite, tools like Distrobox, Toolbox, and Flatpak are first-class citizens with excellent Fedora-specific documentation.
+
+### Advantages of this hybrid approach
+
+| Advantage | Detail |
+|-----------|--------|
+| NVIDIA legacy support | Pin exact driver versions; avoid akmod regressions on older GPUs |
+| Full host flexibility | Any COPR, any RPM — the host is writable, but access is guarded |
+| Real rollback | Snapper pre/post snapshots on every `dnf` transaction, bootable from GRUB |
+| Clean separation | Host = kernel/drivers; Homebrew = CLI tools; Flatpak = GUI apps; Distrobox = dev environments |
+| Reproducible rebuild | Brewfile + distrobox.ini + Makefile phases + `host-setup.sh` rebuild the full setup |
+| Low ongoing maintenance | `make update` handles Flatpak + Brew + Distrobox; host gets security patches automatically |
+
+### Trade-offs
+
+| Trade-off | Detail |
+|-----------|--------|
+| Not truly immutable | The root filesystem is writable; the `dnf` guard enforces discipline, not hardware |
+| Two package managers | Homebrew and DNF can have conflicting library versions — keep dev work inside Distrobox |
+| Homebrew glibc footprint | Homebrew on Linux ships its own glibc (~200 MB); expected, but worth knowing |
+| Phase 7 requires upfront work | chezmoi + dotfiles are powerful but take time to set up correctly |
+
+---
 
 **Setup waves (read this first):**
 
@@ -19,36 +65,38 @@ Until Phase 6, use plain `sudo dnf` for host installs. After Phase 6, use `sudo 
 
 Most setup and day-2 steps are available as **`make` targets** in `~/setup/`. Raw commands below are kept for reference; where automation exists, a **Make** line is shown.
 
+> **Day-2 automation:** `make update` (Flatpak + Brew + Distrobox) can be added to a cron job or a systemd user timer for fully hands-off updates. Host security patches are already automated via `dnf5-automatic` (Phase 6). Brew and Flatpak don't auto-update by design — `make update` is the deliberate trigger.
+
 ```bash
-make -C ~/setup help-setup   # one-time setup targets (phases 0–7)
-make -C ~/setup help         # day-2 maintenance (update, health, snapper, …)
-make -C ~/setup <target>     # from any directory
+make help-setup   # one-time setup targets (phases 0–7)
+make help         # day-2 maintenance (update, health, snapper, …)
+make <target>     # from any directory
 
 # Optional shell alias (~/.zshrc):
-# alias ws='make -C ~/setup'
+# alias ws='make '
 ```
 
 | Phase | Aggregate target | Verify (after phase) |
 |-------|------------------|----------------------|
-| 0 | — | `make -C ~/setup phase0-verify` |
-| 1 | `make -C ~/setup phase1-all` | `phase1-verify` (auto); after reboot: `phase1-verify-gpu` |
-| 2 | `make -C ~/setup phase2-all` | `phase2-verify` (auto) |
-| 3 | `make -C ~/setup phase3-brew-deps` … | `phase3-verify` (mostly **WARN** — brew/shell are manual) |
-| 4 | `make -C ~/setup phase4-flatpak-apps` … | `phase4-verify` |
-| 5 | `make -C ~/setup phase5-distrobox-dev` … | `phase5-verify` |
-| 6 | `make -C ~/setup phase6-dnf-automatic` … | `phase6-verify` |
-| All | — | `make -C ~/setup verify-all` |
-| Day-2 | `make -C ~/setup update` `health` | No host `dnf` |
+| 0 | — | `make phase0-verify` |
+| 1 | `make phase1-all` | `phase1-verify` (auto); after reboot: `phase1-verify-gpu` |
+| 2 | `make phase2-all` | `phase2-verify` (auto) |
+| 3 | `make phase3-brew-deps` … | `phase3-verify` (mostly **WARN** — brew/shell are manual) |
+| 4 | `make phase4-flatpak-apps` … | `phase4-verify` |
+| 5 | `make phase5-distrobox-dev` … | `phase5-verify` |
+| 6 | `make phase6-dnf-automatic` … | `phase6-verify` |
+| All | — | `make verify-all` |
+| Day-2 | `make update` `health` | No host `dnf` |
 
 **Notes:** `phase1-all` and `phase2-all` run their verify step automatically. Failures exit non-zero; **WARN** lines are advisory (optional packages, post-reboot checks, manual steps). Phase 1 host wave still needs `phase1-upgrade` + **reboot** before `phase1-verify-gpu`. Run `make … phaseN-verify` **without sudo** (root breaks Homebrew and `~/.local` checks; if you used `sudo make`, verify re-runs as your user automatically).
 
-Layout: `~/setup/Makefile`, `~/setup/scripts/*.sh`, this guide at `~/fedora-kde-immutable-like-setup.md`. Skipped steps (ISO install, `ssh-copy-id`, interactive installers) have no target — see `make -C ~/setup help-setup`.
+Layout: `~/setup/Makefile`, `~/setup/scripts/*.sh`, this guide at `~/setup/fedora-kde-immutable-like-setup.md`. Skipped steps (ISO install, `ssh-copy-id`, interactive installers) have no target — see `make help-setup`.
 
 ---
 
 ## Phase 0: Installation
 
-> **Make:** `make -C ~/setup phase0-verify` (after install)
+> **Make:** `make phase0-verify` (after install)
 
 - [ ] Download **Fedora KDE Spin 44** ISO
 - [ ] Boot installer and choose **Custom Partitioning**
@@ -64,19 +112,21 @@ Layout: `~/setup/Makefile`, `~/setup/scripts/*.sh`, this guide at `~/fedora-kde-
   sudo btrfs subvolume list /
   ```
 - [ ] Plan **`/var/mount`** layout: all extra disks mount at **`/var/mount/<Name>`** (e.g. `Projects`, `Backup`, `Workspace`) — not `/mnt` or `$HOME`. See [Appendix C](#appendix-c-etcfstab-and-varmount).
+
+  > **Removable media note:** KDE Plasma auto-mounts removable USB drives under `/run/media/$USER/<label>` via Solid — this is not configurable without patching udev rules, and isn't worth fighting. The `/var/mount` convention is for **permanent extra disks** listed in `/etc/fstab`. Leave USB auto-mount behaviour as-is.
 - [ ] Complete installation and reboot
 
 ---
 
 ## Phase 1: NVIDIA 580xx Legacy Driver (Host — the only big `dnf` step)
 
-> **Make:** `make -C ~/setup phase1-all` — or step-by-step: `phase1-dnf-tweaks`, `phase1-ssh`, … (`help-setup`). After install: `phase1-verify`; after reboot: `phase1-verify-gpu` (or `make gpu-test`).
+> **Make:** `make phase1-all` — or step-by-step: `phase1-dnf-tweaks`, `phase1-ssh`, … (`help-setup`). After install: `phase1-verify`; after reboot: `phase1-verify-gpu` (or `make gpu-test`).
 
 This is the one area where you must touch the host system with `dnf`. Get it done first.
 
 ### DNF Speed Tweaks (Do This First)
 
-> **Make:** `make -C ~/setup phase1-dnf-tweaks`
+> **Make:** `make phase1-dnf-tweaks`
 
 Fedora's defaults are conservative. Two small config changes make every subsequent `dnf` command significantly faster — apply these *before* the first `dnf upgrade` so the rest of the setup benefits.
 
@@ -112,13 +162,13 @@ A few caveats from the field:
   sudo dnf upgrade --refresh -y
   sudo reboot
   ```
-  > **Make:** `make -C ~/setup phase1-upgrade` (reboot manually)
+  > **Make:** `make phase1-upgrade` (reboot manually)
 
 ### SSH Server (Early Setup)
 
-> **Make:** `make -C ~/setup phase1-ssh` · optional: `make phase1-fail2ban`
+> **Make:** `make phase1-ssh` · optional: `make phase1-fail2ban`
 
-Get SSH running first so you can manage the machine remotely while doing the rest of the setup — useful for working from your laptop, VS Code Remote-SSH, jump-host setups to your Jetson devices, etc.
+Get SSH running first so you can manage the machine remotely while doing the rest of the setup — useful for remote access from a laptop, VS Code Remote-SSH, or as a jump host to other machines on your network.
 
 - [ ] Verify openssh-server is installed (usually shipped with Fedora):
   ```bash
@@ -186,6 +236,8 @@ Get SSH running first so you can manage the machine remotely while doing the res
   ```
 
 - [ ] Create a drop-in jail config for sshd:
+
+  > **chezmoi note:** This file lives in `/etc/fail2ban/` — chezmoi only manages `$HOME`. The `make phase1-fail2ban` target re-creates it idempotently; that's the right place to track it.
   ```bash
   sudo tee /etc/fail2ban/jail.d/sshd.local > /dev/null << 'EOF'
   [sshd]
@@ -248,12 +300,12 @@ Get SSH running first so you can manage the machine remotely while doing the res
       User your-username
       Port 22
       IdentityFile ~/.ssh/id_ed25519
-      ForwardAgent yes      # useful for git push from the workstation using your laptop keys
+      ForwardAgent yes      # useful for git push from the workstation using your client computer keys
   ```
 
 ### Debugging Tools (Host)
 
-> **Make:** `make -C ~/setup phase1-debug` · `make phase1-perf`
+> **Make:** `make phase1-debug` · `make phase1-perf`
 
 System debuggers and profilers need kernel-level access (perf counters, ptrace, kprobes), so they go on the host — not in a sandbox. These complement your existing GDB infrastructure.
 
@@ -270,14 +322,14 @@ System debuggers and profilers need kernel-level access (perf counters, ptrace, 
     elfutils
   ```
 
-**What each is for, in your context:**
-- **gdb** + your `.gdbinit` with STL pretty-printers, GStreamer/DeepStream/CUDA helpers
-- **gdbserver** — run on the host to accept remote debugger connections (e.g., from VS Code on your laptop), or use the workstation's gdb client to attach to a `gdbserver` running on a Jetson
-- **strace** / **ltrace** — system call and library call tracing (essential for "why is this binary hanging" investigations)
-- **perf** — Linux perf events; CPU profiling, cache misses, scheduler analysis. Useful for your video pipeline performance work
-- **valgrind** — memory checker; less useful with C++ smart pointers but still valuable for catching uninitialized reads
+**What each tool does:**
+- **gdb** — interactive debugger; pair with a `~/.gdbinit` for pretty-printers and project-specific helpers
+- **gdbserver** — runs on the host to accept remote debugger connections (e.g., from VS Code on a laptop), or attach from a local gdb client to a `gdbserver` on a remote machine
+- **strace** / **ltrace** — system-call and library-call tracing; essential for diagnosing hangs, unexpected file access, or missing shared libraries
+- **perf** — Linux perf events: CPU profiling, cache miss analysis, scheduler latency. Needs host-level access, which is why it can't live in a container
+- **valgrind** — memory error detector; catches uninitialized reads, use-after-free, and heap leaks
 
-- [ ] (Optional) Cross-architecture debugging for your Jetson (aarch64) workflow — install via a Distrobox (Phase 5) with Debian/Ubuntu base, which has `gdb-multiarch` ready-to-use. Fedora doesn't package gdb-multiarch directly; building it from source on the host isn't worth the hassle when a one-line `distrobox-create` gives you a clean aarch64-capable gdb.
+- [ ] (Optional) Cross-architecture debugging (e.g., aarch64) — install `gdb-multiarch` via a Distrobox with a Debian/Ubuntu base image, which packages it directly. Fedora doesn't ship `gdb-multiarch`; building it from source on the host is not worth the effort when a one-line `distrobox create` gives you a clean cross-capable gdb.
 
 - [ ] Allow `perf` to access hardware counters without root (set kernel param at boot):
   ```bash
@@ -287,7 +339,7 @@ System debuggers and profilers need kernel-level access (perf counters, ptrace, 
 
 ---
 
-> **Make:** `make -C ~/setup phase1-rpmfusion` · `make phase1-nvidia` · `make phase1-nvidia-suspend` · `make phase1-nvidia-toolkit` · `make phase1-podman` · `make phase1-cdi` · `make phase1-refresh-cdi-script`
+> **Make:** `make phase1-rpmfusion` · `make phase1-nvidia` · `make phase1-nvidia-suspend` · `make phase1-nvidia-toolkit` · `make phase1-podman` · `make phase1-cdi` · `make phase1-refresh-cdi-script`
 
 - [ ] Enable RPM Fusion repos:
   ```bash
@@ -296,7 +348,15 @@ System debuggers and profilers need kernel-level access (perf counters, ptrace, 
     https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
   ```
 
-- [ ] Install the **580xx legacy driver** (NOT the default `akmod-nvidia` which pulls 595+):
+- [ ] **Check which driver branch is available** for your GPU:
+  ```bash
+  dnf search akmod-nvidia | grep '^akmod-nvidia'
+  # Current packages: akmod-nvidia (latest), akmod-nvidia-580xx (legacy Pascal/Turing)
+  # Use the latest branch (akmod-nvidia) for GTX 16xx / RTX 20xx and newer.
+  # Use akmod-nvidia-580xx for GTX 10xx (Pascal) and GTX 9xx (Maxwell).
+  ```
+
+- [ ] Install the **580xx legacy driver** (for Pascal GPUs — GTX 10xx series):
   ```bash
   sudo dnf install -y \
     akmod-nvidia-580xx \
@@ -312,11 +372,13 @@ System debuggers and profilers need kernel-level access (perf counters, ptrace, 
   sudo dracut --force
   ```
 
+  `dracut --force` rebuilds the **initramfs** (initial RAM disk) — the small filesystem the kernel boots from before the real root is mounted. The Nouveau blacklist and the new NVIDIA kernel module are baked into the initramfs here. Without this step, the kernel would ignore the blacklist on next boot and Nouveau would load before the NVIDIA driver, causing a conflict.
+
 - [ ] Reboot and verify:
   ```bash
   sudo reboot
   # After reboot:
-  nvidia-smi          # Should show GTX 1070, driver 580.x
+  nvidia-smi          # Should show your GPU, and selected driver version
   ```
 
 - [ ] **Fix NVIDIA suspend/resume** (Pascal has known issues — system hangs or wakes to a black screen). NVIDIA ships systemd services that handle GPU state save/restore, but they're not enabled by default:
@@ -345,7 +407,6 @@ System debuggers and profilers need kernel-level access (perf counters, ptrace, 
 - [ ] Install **nvidia-container-toolkit** for GPU passthrough to containers. On Fedora the `.repo` file ships with the GPG key URL embedded (`gpgkey=...`), so DNF fetches and imports it automatically — no manual `gpg --dearmor` step needed (that pattern is Debian-only).
 
   **Fedora 44 note:** If `curl` or `dnf` fails on HTTPS, ensure `sslcacert` is set in `/etc/dnf/dnf.conf` (see DNF tweaks above and [Appendix A](#appendix-a-fedora-44-gotchas)).
-```
   ```bash
   # Add NVIDIA container repo
   curl -fsSL https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo | \
@@ -371,7 +432,7 @@ System debuggers and profilers need kernel-level access (perf counters, ptrace, 
   podman --version
   ```
 
-- [ ] **Distrobox** — launcher for Phase 5 dev containers. Prefer **Homebrew** (Phase 3: `brew install distrobox` or `make phase3-brew-cli`); `make phase1-podman` falls back to `dnf` only if Brew is not installed yet:
+- [ ] **Distrobox** — launcher for Phase 5 dev containers. Prefer **Homebrew** (Phase 3: `brew install distrobox` or `make phase3-brew-cli`); `make phase1-podman` falls back to `dnf` only if Brew is not installed yet (I prefer isuing `brew`):
   ```bash
   command -v distrobox >/dev/null || rpm -q distrobox || brew install distrobox || sudo dnf install -y distrobox
   distrobox --version
@@ -438,7 +499,7 @@ System debuggers and profilers need kernel-level access (perf counters, ptrace, 
 
 ### Media Codecs (RPM Fusion)
 
-> **Make:** `make -C ~/setup phase1-codecs` · `make phase1-vaapi` · `make phase1-flatpak-ffmpeg`
+> **Make:** `make phase1-codecs` · `make phase1-vaapi` · `make phase1-flatpak-ffmpeg`
 
 Fedora ships with limited/patent-free media support by default. Since RPM Fusion is already enabled, install the full multimedia stack now.
 
@@ -460,7 +521,7 @@ Fedora ships with limited/patent-free media support by default. Since RPM Fusion
     gstreamer1-plugins-bad-freeworld
   ```
   
-  (You'll especially appreciate this given your GStreamer pipeline work — having the full plugin set on the host means less surprise when comparing host vs container behavior.)
+  Having the full plugin set on the host means media playback, video thumbnails, and any host-side multimedia tooling works correctly — and there are no surprises when comparing host vs container codec availability.
 
 - [ ] (Optional) Install the **Sound and Video** group — on Fedora 44 / DNF5 the old id `sound-and-video` no longer exists. The explicit package list above is usually sufficient; use this only if you want the full group:
   ```bash
@@ -499,7 +560,7 @@ Fedora ships with limited/patent-free media support by default. Since RPM Fusion
 
 ## Phase 2: Btrfs Snapshots + Rollback (Your "Atomic" Safety Net)
 
-> **Make:** `make -C ~/setup phase2-all` — or: `phase2-snapper`, … `phase2-grub-test`. Confirms setup: `phase2-verify` (runs automatically at end of `phase2-all`).
+> **Make:** `make phase2-all` — or: `phase2-snapper`, … `phase2-grub-test`. Confirms setup: `phase2-verify` (runs automatically at end of `phase2-all`).
 
 This gives you the same rollback capability as an atomic OS — automatic snapshots before/after every `dnf` transaction, bootable from GRUB.
 
@@ -507,7 +568,7 @@ This gives you the same rollback capability as an atomic OS — automatic snapsh
   ```bash
   sudo dnf install -y snapper python3-dnf-plugin-snapper btrfs-assistant
   ```
-  > **Make:** `make -C ~/setup phase2-snapper` (install + `create-config` + `ALLOW_USERS`)
+  > **Make:** `make phase2-snapper` (install + `create-config` + `ALLOW_USERS`)
 
 - [ ] Alternatively, use the automated setup script (tested on Fedora 44):
   ```bash
@@ -559,7 +620,7 @@ You can still prefix `sudo snapper -c root …` everywhere; it works, but is unn
 
   #### Recommended: install from upstream (includes `grub-btrfsd`)
 
-  > **Make:** `make -C ~/setup phase2-grub-btrfs`
+  > **Make:** `make phase2-grub-btrfs`
 
   ```bash
   sudo dnf install -y git make inotify-tools
@@ -613,7 +674,7 @@ You can still prefix `sudo snapper -c root …` everywhere; it works, but is unn
 
   #### Generate GRUB config and test
 
-  > **Make:** `make -C ~/setup phase2-grub-test` · day-2: `make health`
+  > **Make:** `make phase2-grub-test` · day-2: `make health`
 
   ```bash
   ls /.snapshots
@@ -657,7 +718,7 @@ You can still prefix `sudo snapper -c root …` everywhere; it works, but is unn
   **Without grub-btrfs:** you can still roll back with `snapper undochange` from a running system — you just will not see snapshots in the GRUB menu at boot.
 
 - [ ] Set snapshot retention limits (avoid disk bloat; you already have hourly **timeline** snapshots — these limits prevent unbounded growth):
-  > **Make:** `make -C ~/setup phase2-snapper-retention`
+  > **Make:** `make phase2-snapper-retention`
   ```bash
   sudo snapper -c root set-config "NUMBER_LIMIT=50"
   sudo snapper -c root set-config "TIMELINE_LIMIT_HOURLY=5"
@@ -683,7 +744,7 @@ You can still prefix `sudo snapper -c root …` everywhere; it works, but is unn
   systemctl list-timers 'snapper-*'
   systemctl status snapper-cleanup.timer snapper-timeline.timer
   ```
-  > **Make:** `make -C ~/setup phase2-snapper-timers` · day-2: `make snapper-cleanup` `make snapper-timers`
+  > **Make:** `make phase2-snapper-timers` · day-2: `make snapper-cleanup` `make snapper-timers`
 
   Manual one-shot (same as the cleanup timer — only if debugging):
 
@@ -700,6 +761,8 @@ You can still prefix `sudo snapper -c root …` everywhere; it works, but is unn
   ```
 
   Add:
+
+  > **chezmoi note:** This drop-in lives under `/etc/systemd/` — chezmoi only manages `$HOME`. If you want this persisted across reinstalls, copy the drop-in to `~/setup/scripts/` and apply it via a Makefile target.
 
   ```ini
   [Timer]
@@ -724,9 +787,8 @@ You can still prefix `sudo snapper -c root …` everywhere; it works, but is unn
   # Or boot into a snapshot from GRUB menu for full rollback
   ```
 
-- [ ] Install **Btrfs Assistant** (GUI) for visual snapshot management:
+- [ ] **Btrfs Assistant** (GUI) — already installed as an RPM in the `phase2-snapper` step above. A Flatpak build is available if you prefer sandboxed updates instead:
   ```bash
-  # Already installed above, or:
   flatpak install flathub org.btrfs-assistant.btrfs-assistant
   ```
 
@@ -734,7 +796,7 @@ You can still prefix `sudo snapper -c root …` everywhere; it works, but is unn
 
 ## Phase 3: Shell Environment (Homebrew + Zsh)
 
-> **Make:** `make -C ~/setup phase3-brew-deps` · `make phase3-brew-cli` · `make phase3-brew-tap` — **no target:** Homebrew install script, oh-my-zsh, `chsh` (interactive)
+> **Make:** `make phase3-brew-deps` · `make phase3-brew-cli` · `make phase3-brew-tap` — **no target:** Homebrew install script, oh-my-zsh, `chsh` (interactive)
 
 From here on, **avoid `dnf` for user-space tools** (Phase 6 adds a guard). Homebrew lives in `/home/linuxbrew/.linuxbrew` — isolated from the system.
 
@@ -844,7 +906,7 @@ From here on, **avoid `dnf` for user-space tools** (Phase 6 adds a guard). Homeb
 
 - [ ] (Optional) Other useful casks from the ublue tap:
   ```bash
-  brew install --cask jetbrains-toolbox-linux    # CLion is great for your C++/DeepStream work
+  brew install --cask jetbrains-toolbox-linux    # CLion, IntelliJ, PyCharm, etc.
   brew install --cask 1password-gui-linux        # Password manager
   brew install --cask lm-studio-linux            # Local LLM runner
   brew install --cask vscodium-linux             # Telemetry-free VS Code build
@@ -875,7 +937,7 @@ Knowing this saves confusion later:
 
 ## Phase 4: GUI Applications via Flatpak
 
-> **Make:** `make -C ~/setup phase4-flathub` · `make phase4-flatpak-apps` · `make phase4-virt` · `make phase4-crypto` · `make phase4-okular` · `make phase4-flatpak-xdg` (KDE menu fix)
+> **Make:** `make phase4-flathub` · `make phase4-flatpak-apps` · `make phase4-virt` · `make phase4-crypto` · `make phase4-okular` · `make phase4-flatpak-xdg` (KDE menu fix)
 
 All GUI apps should come from Flathub. No `dnf` for desktop applications. (Host exceptions below use `sudo dnf` until Phase 6; after Phase 6 use `sudo dnf-host`.)
 
@@ -890,11 +952,12 @@ All GUI apps should come from Flathub. No `dnf` for desktop applications. (Host 
 On most Fedora KDE installs, Flathub apps appear automatically. If they do not show in the application launcher or KRunner, prepend Flatpak export paths to `XDG_DATA_DIRS` system-wide (survives reboots; no per-app copying):
 
 ```bash
-# Replace YOUR_USER with your login name, or use: echo $USER
 sudo tee /etc/environment.d/flatpak.conf > /dev/null << EOF
-XDG_DATA_DIRS=/var/lib/flatpak/exports/share:/home/YOUR_USER/.local/share/flatpak/exports/share:/usr/local/share:/usr/share
+XDG_DATA_DIRS=/var/lib/flatpak/exports/share:$HOME/.local/share/flatpak/exports/share:/usr/local/share:/usr/share
 EOF
 ```
+
+> **chezmoi note:** This file lives under `/etc/environment.d/` — chezmoi only manages `$HOME`. The `make phase4-flatpak-xdg` target re-creates it; that's the right place to track it.
 
 Log out of KDE and back in (or reboot). Optionally rebuild the KDE menu cache:
 ```bash
@@ -966,7 +1029,7 @@ QEMU/KVM needs host-level integration (kernel modules, libvirt daemon, network b
 **Why you want it:**
 - Test Ubuntu/Debian/Arch VMs without dual-booting
 - Validate Docker Swarm or Kubernetes setups against fresh OS images
-- Reproduce customer/CI environments for DeepStream debugging
+- Reproduce customer/CI environments for debugging
 - (Advanced) GPU passthrough to a Windows VM — possible on Pascal with caveats
 
 - [ ] Install virtualization packages on the host:
@@ -1093,7 +1156,7 @@ Homebrew has GPG (`brew install gnupg`), but it ships an isolated GPG keyring un
 
 ## Phase 5: Development Environments via Distrobox
 
-> **Make:** `make -C ~/setup phase5-distrobox-config` · `make phase5-distrobox-dev` · `make phase5-distrobox-deepstream` — **no target:** `dnf install` inside containers (run after `distrobox enter`)
+> **Make:** `make phase5-distrobox-config` · `make phase5-distrobox-dev` — **no target:** `dnf install` inside containers (run after `distrobox enter`)
 
 This is where your "mutable development" lives — completely isolated from the host. Distrobox should already be on your `PATH` from Phase 3 (`brew install distrobox`) or Phase 1 (`dnf` / `make phase1-podman`).
 
@@ -1114,6 +1177,8 @@ This is where your "mutable development" lives — completely isolated from the 
   EOF
   ```
 
+  > **chezmoi:** Yes — `~/.config/distrobox/distrobox.conf` lives in `$HOME` and should be tracked in your dotfiles repo. Add it with `chezmoi add ~/.config/distrobox/distrobox.conf`.
+
 - [ ] (Optional) Export a host IDE into the desktop menu from inside a container (example — adjust app name/path):
   ```bash
   # After creating a container (below), from inside it or with --name:
@@ -1122,6 +1187,7 @@ This is where your "mutable development" lives — completely isolated from the 
   # Or export a binary to ~/.local/bin:
   distrobox-export --bin /usr/bin/cmake --export-path ~/.local/bin
   ```
+  `distrobox-export --app` creates a `.desktop` file in `~/.local/share/applications/` and a thin wrapper script in `~/.local/bin/`. The app then appears in KDE's application launcher and KRunner exactly like a natively installed app — the user has no visible indication it's running inside a container.
 
 - [ ] Create a **primary dev container** (Fedora-based):
   ```bash
@@ -1136,15 +1202,6 @@ This is where your "mutable development" lives — completely isolated from the 
     gdb valgrind strace \
     git-lfs \
     openssl-devel
-  ```
-
-- [ ] Create a **C++/DeepStream dev container** (Ubuntu-based, for NVIDIA compatibility):
-  ```bash
-  distrobox create --name deepstream --image ubuntu:22.04 --additional-packages "build-essential cmake python3 python3-pip"
-  distrobox enter deepstream
-  
-  # Inside: install your DeepStream/TensorRT/pybind11 toolchain
-  # This container can access the host's NVIDIA driver via Distrobox integration
   ```
 
 - [ ] **Export frequently-used binaries** from containers to host:
@@ -1163,7 +1220,7 @@ This is where your "mutable development" lives — completely isolated from the 
   exported_bins_path="~/.local/bin"
   additional_packages="gcc gcc-c++ cmake python3 python3-pip gdb"
 
-  [deepstream]
+  [c_cpp]
   image=ubuntu:22.04
   init=false
   additional_packages="build-essential cmake python3 python3-pip"
@@ -1171,14 +1228,14 @@ This is where your "mutable development" lives — completely isolated from the 
 
 - [ ] Recreate all containers from manifest:
   ```bash
-  distrobox-assemble create --file ~/distrobox.ini
+  distrobox assemble create --file ~/distrobox.ini
   ```
 
 ---
 
 ## Phase 6: Lock Down the Host
 
-> **Make:** `make -C ~/setup phase6-dnf-automatic` · `make phase6-nvidia-versionlock` · `make phase6-dnf-guard`
+> **Make:** `make phase6-dnf-automatic` · `make phase6-nvidia-versionlock` · `make phase6-dnf-guard`
 
 Now that everything is set up, minimize future `dnf` usage on the host.
 
@@ -1228,6 +1285,8 @@ Let the host self-patch overnight so security updates don't pile up. Fedora 44 u
   [base]
   debuglevel = 1
   ```
+
+  > **chezmoi note:** `/etc/dnf/automatic.conf` is a system path — chezmoi only manages `$HOME`. The `make phase6-dnf-automatic` target creates this file idempotently; put any customisations in `scripts/dnf-automatic.sh` instead.
   
   Notes:
   - `upgrade_type = security` is safer than `default` (all updates). For a workstation, you want security patches automated but feature updates done deliberately.
@@ -1249,6 +1308,8 @@ Let the host self-patch overnight so security updates don't pile up. Fedora 44 u
   RandomizedDelaySec=60m
   ```
 
+  > **chezmoi note:** Timer overrides live under `/etc/systemd/` — not `$HOME`. Track the override in `~/setup/scripts/` and apply it via a Makefile target if you want it reproducible.
+
 - [ ] Verify it's scheduled and check status:
   ```bash
   systemctl list-timers '*dnf*'
@@ -1261,7 +1322,7 @@ Let the host self-patch overnight so security updates don't pile up. Fedora 44 u
   journalctl -u dnf5-automatic.service --since "1 week ago"
   ```
 
-- [ ] **Pin the NVIDIA driver** to prevent automatic updates from pulling 595+:
+- [ ] **Pin the NVIDIA driver** to prevent automatic security updates from pulling a newer branch that your GPU doesn't support. This applies if you installed a legacy branch (`akmod-nvidia-580xx`). **Skip this step if you installed the current `akmod-nvidia` package** (GTX 16xx / RTX series and newer — the current branch is always safe to update):
   ```bash
   sudo dnf versionlock add akmod-nvidia-580xx xorg-x11-drv-nvidia-580xx*
   ```
@@ -1314,6 +1375,8 @@ Habits are hard to enforce by willpower alone. Install a friendly speed-bump tha
   sudo chmod +x /usr/local/bin/dnf
   ```
 
+  > **chezmoi note:** `/usr/local/bin/dnf` and `/usr/local/bin/dnf-host` are system paths — not `$HOME`. They are created by `make phase6-dnf-guard` and will be re-created by `host-setup.sh` on a fresh install.
+
 - [ ] Create the explicit escape hatch:
   ```bash
   sudo tee /usr/local/bin/dnf-host > /dev/null << 'EOF'
@@ -1342,7 +1405,6 @@ Habits are hard to enforce by willpower alone. Install a friendly speed-bump tha
 - `dnf5-automatic.timer` → calls `/usr/bin/dnf5-automatic` directly, unaffected
 - Akmod rebuilds → use DNF libraries, not the CLI
 - PackageKit (Discover) → uses DNF libraries via D-Bus, unaffected
-- `rpm-ostree` → not used on Workstation, but would also be unaffected
 
 **Optional Level 2 — Block AUR-style repos:** Make `/etc/yum.repos.d/` immutable so accidentally-added repos can't load:
 ```bash
@@ -1354,8 +1416,8 @@ sudo chattr +i /etc/yum.repos.d/*.repo
 ---
 
 ## Phase 7: Dotfiles & Reproducibility
-!!! this script is missing
-> **Make:** `make -C ~/setup phase7-brewfile-dump` — **no target:** chezmoi init, `host-setup.sh` (documentation only)
+
+> **Make:** `make phase7-all` (`phase7-brewfile-dump` + `phase7-host-setup`) · `make phase7-verify` — **no target:** chezmoi init (interactive)
 
 Make your entire setup reproducible so you can rebuild from scratch.
 
@@ -1371,13 +1433,13 @@ Make your entire setup reproducible so you can rebuild from scratch.
   - `~/.config/nvim/` (Neovim config)
   - `~/.gitconfig`, `~/.gitignore_global`
   - `~/.ssh/config` (NOT private keys — manage separately)
-  - `~/.gdbinit` and any GDB scripts (your STL pretty-printers, GStreamer/DeepStream helpers, kernel data traversal commands)
+  - `~/.gdbinit` and any GDB scripts
   - `~/.config/distrobox/distrobox.conf`
   - `~/Brewfile`
-  - `~/setup/Makefile` + `~/setup/scripts/` (automation — `make -C ~/setup help`)
+  - `~/setup/Makefile` + `~/setup/scripts/` (automation — `make help`)
   - VS Code: `vscode-extensions.txt` (export with `code --list-extensions`)
   - Cursor: `vscode-extensions.txt` (export with `code --list-extensions`)
-  - `host-setup.sh` (your one-time dnf installs) !!! where is this script
+  - `~/setup/scripts/host-setup.sh` (the orchestration script — run phases 1–6 on a fresh install; created in the step below)
 
 ### What to Back Up (Beyond Dotfiles)
 
@@ -1399,7 +1461,6 @@ Chezmoi covers config-as-code. Other things need their own backup strategy:
 - Anything you'd care about losing
 
 **Has its own native sync:**
-- VS Code Settings Sync → GitHub/MS account (extensions, keybindings, snippets)
 - KWallet → consider exporting to Proton Pass for cross-device access
 - Browser data → Vivaldi Sync or Firefox Sync
 
@@ -1414,8 +1475,7 @@ Chezmoi covers config-as-code. Other things need their own backup strategy:
 - Test restore at least once — untested backups don't count
 
 - [ ] Create a **Brewfile** for reproducible Brew installs:
-!!! where is this step in makefile
-  > **Make:** `make -C ~/setup phase7-brewfile-dump`
+  > **Make:** `make phase7-brewfile-dump`
   ```bash
   brew bundle dump --file=~/Brewfile
   # To restore on a new machine:
@@ -1425,7 +1485,6 @@ Chezmoi covers config-as-code. Other things need their own backup strategy:
 - [ ] Document your one-time `dnf` setup in a `host-setup.sh` script:
   ```bash
   #!/bin/bash
-  !!! where is this script
   # host-setup.sh — Run once after fresh Fedora KDE install
   # 1. DNF speed tweaks (fastestmirror, max_parallel_downloads, defaultyes, keepcache)
   # 2. SSH server (sshd + firewalld + hardened config + optional fail2ban)
@@ -1466,11 +1525,11 @@ Chezmoi covers config-as-code. Other things need their own backup strategy:
 | Chrome, Slack, Spotify, GIMP | Flathub            | `flatpak`   |
 | VS Code, JetBrains IDEs      | Homebrew (ublue tap) | `brew`    |
 | gcc, cmake, gdb, python      | Distrobox          | `dnf`/`apt` |
-| DeepStream, TensorRT         | Docker container   | `docker`    |
+| GPU ML workloads, CUDA libs  | Docker/Podman container | `docker`/`podman` |
 | Node.js (project-level)      | Distrobox or Brew  | `brew`/`dnf`|
 | GPU containers / inference   | Podman + CDI       | `podman`    |
 | Multi-container stacks       | podman-compose     | `dnf` or `brew` |
-| Docker Swarm (work)          | Docker (optional)  | `docker`    |
+| Docker Swarm (optional)      | Host (`dnf`)       | One-time    |
 
 The ublue-os tap is additive — your normal `brew install <thing>` keeps working exactly the same. The tap just adds Linux-specific casks (with `-linux` suffix) for apps that don't play well as Flatpaks.
 
@@ -1525,7 +1584,7 @@ test -f /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem && echo OK
 
 ## Appendix B: Day-2 Operations
 
-Routine maintenance after the initial setup. Prefer **`~/setup/Makefile`** — run `make -C ~/setup help` (or `alias ws='make -C ~/setup'`). Raw commands are kept below each section.
+Routine maintenance after the initial setup. Prefer **`~/setup/Makefile`** — run `make help` (or `alias ws='make -C ~/setup'`). Raw commands are kept below each section.
 
 | `make` target | What it does |
 |---------------|----------------|
@@ -1548,7 +1607,7 @@ Routine maintenance after the initial setup. Prefer **`~/setup/Makefile`** — r
 
 ### After NVIDIA driver or kernel updates
 
-> **Make:** `make -C ~/setup refresh-gpu` · `make gpu-test`
+> **Make:** `make refresh-gpu` · `make gpu-test`
 
 ```bash
 # Regenerate CDI spec (library paths change with driver version)
@@ -1583,8 +1642,7 @@ sudo snapper cleanup number
 
 ```bash
 distrobox list
-distrobox upgrade --name dev
-distrobox upgrade --name deepstream
+distrobox upgrade --all
 ```
 
 ### Flatpak updates
@@ -1680,6 +1738,8 @@ ls -l /dev/disk/by-uuid/
 
 ### This machine's `/etc/fstab` (Anaconda + `/var/mount`)
 
+> **Note:** The UUIDs below are this machine's actual values. Replace with your own (`sudo blkid`) before using on another system.
+
 Anaconda created the root layout; three extra lines mount **`/var/mount/Workspace`**, **`/var/mount/Backup`**, and **`/var/mount/Projects`** (mount points under `/var/mount/`, not elsewhere). **No `user`/`users` options** — correct for dev disks. **`exec` is explicit** on all three (good after debugging the `users`→`noexec` trap).
 
 ```fstab
@@ -1693,10 +1753,7 @@ UUID=172544c6-2ac2-4e29-8ce9-dd1d8ca5f07d   /home       btrfs   subvol=home,comp
 UUID=6970f6c8-3a3c-4c09-9b7a-7df82be8ade5   /var/mount/Workspace   ext4    rw,nofail,exec   0 0
 UUID=09664679-0877-4e2e-b156-70cabc234865   /var/mount/Backup      ext4    rw,nofail,exec   0 0
 UUID=eabbaa3f-562a-4d33-b18f-36abfac66133   /var/mount/Projects    btrfs   rw,nofail,exec   0 0
-# Replace /dev/sde1 with the UUID line above — sdX names can swap after reboot
 ```
-
-**One change recommended:** use `UUID=eabbaa3f-562a-4d33-b18f-36abfac66133` instead of `/dev/sde1` for Projects so a kernel/device reorder does not mount the wrong disk or fail boot.
 
 Optional polish (not required): `defaults,nofail,exec` instead of `rw,nofail,exec` (`defaults` = rw,suid,dev,exec,async); add `compress=zstd:1` on Projects btrfs to match `/` and `/home`.
 
