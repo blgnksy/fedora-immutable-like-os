@@ -1,6 +1,6 @@
 # Fedora KDE Plasma Desktop 44 — "Immutable-Like" Developer Workstation Setup
 
-> **Goal:** Fedora KDE Plasma Desktop with Nvidia GPU (GTX 1070), behaving as close to an atomic/immutable OS as possible. Minimize *ongoing* `dnf` usage on the host after initial setup. Use Homebrew for CLI tools, Flatpak for GUI apps, Distrobox/Toolbox for dev environments and for some application that no need to be installed on host directly (keep this state for clean/reproducible OS setup), and Btrfs snapshots for rollback safety.
+> **Goal:** Fedora KDE Plasma Desktop with Nvidia GPU (GTX 1070), behaving as close to an atomic/immutable OS as possible. Minimize *ongoing* `dnf` usage on the host after initial setup. Use Homebrew for CLI tools, Flatpak for GUI apps, Distrobox/Toolbox for dev environments and for some application that no need to be installed on host directly that is also not available via brew formula (keep this state for clean/reproducible OS setup), and Btrfs snapshots for rollback safety.
 >
 > **Mental model:** This is a **snapshot-backed minimal host**, not a true immutable OS (Silverblue/Kinoite). Phase 1 is intentionally a large one-time `dnf` wave (drivers, codecs, Podman). Phases 3–5 add user-space layers (Homebrew CLI including Distrobox, Flatpak, containers); Phase 6 locks the host down. Phase 7 finalizes reproducibility: Brewfile dump, chezmoi dotfiles, and the `host-setup.sh` orchestration script.
 
@@ -17,7 +17,7 @@ Fedora Kinoite (the KDE variant of Silverblue) is a genuine atomic OS — the ro
 - **The immutability benefit is mostly irrelevant for a single personal machine.** The real value of immutable OSes is fleet consistency and atomic OS-level rollback — on a personal workstation, Snapper gives you per-transaction rollback that's arguably more granular.
 - **Tooling is the same either way.** Distrobox, Podman, Flatpak, and Homebrew work identically on Kinoite and on this setup. You don't lose any of the layered model by staying on Workstation.
 
-The conclusion: if you have a modern, well-supported GPU and don't need COPR packages, Kinoite is an excellent choice. If you have a legacy GPU, need specific host packages, or want a more familiar setup path, the immutable-*like* approach here gives you 90% of the benefits with far less friction.
+The conclusion: if you have a modern, well-supported GPU and prefer a stricter appliance-style workflow, Kinoite/Aurora/Bluefin is an excellent choice. If you have a legacy GPU, need specific host packages, or want a more familiar setup path, the immutable-*like* approach here gives you 90% of the benefits with far less friction.
 
 ### Why Fedora KDE Workstation?
 
@@ -25,8 +25,37 @@ The conclusion: if you have a modern, well-supported GPU and don't need COPR pac
 - **Btrfs by default.** Anaconda creates Btrfs with `root` and `home` subvolumes out of the box, giving you Snapper-compatible layout with no manual partitioning work.
 - **DNF5 + RPM Fusion.** DNF5 (Fedora 41+) is significantly faster than DNF4. Combined with RPM Fusion's broad package set, the host package story is solid for a one-time-setup model.
 - **SELinux enforcing by default.** Strong security posture without sacrificing usability.
-- **KDE Plasma** is highly configurable, resource-efficient, and works well with NVIDIA on both X11 and Wayland. Compared to GNOME, it requires no extensions to be fully functional.
+- **KDE Plasma** is highly configurable, resource-efficient, and works well with NVIDIA on both X11 and Wayland(my choice). Compared to GNOME, it requires no extensions to be fully functional.
 - **Immutable-first tooling is well-tested here.** Because Fedora is home to Silverblue/Kinoite, tools like Distrobox, Toolbox, and Flatpak are first-class citizens with excellent Fedora-specific documentation.
+
+
+### Why this workflow works well on a personal machine
+
+This setup deliberately separates responsibilities across layers instead of turning the host operating system into a general-purpose dumping ground.
+
+The idea is simple:
+
+- **The host OS should stay boring and predictable.**
+  Fedora handles the kernel, graphics stack, firmware, filesystem, networking, virtualization, and security updates.
+- **GUI applications should stay sandboxed and disposable.**
+  Flatpak keeps desktop applications isolated from the base system while still integrating nicely with KDE Plasma.
+- **CLI tooling should stay user-owned.**
+  Homebrew avoids cluttering the host with development utilities and keeps your personal shell environment portable across Linux and macOS.
+- **Development stacks should stay containerized.**
+  Distrobox gives you mutable environments for compilers, SDKs, language runtimes, and experimental packages without polluting the base OS.
+
+This creates a practical middle ground between a traditional mutable Linux installation and a fully immutable operating system:
+
+| Traditional distro | This setup | Fully immutable distro |
+|---|---|---|
+| Everything installed on host | Host minimized intentionally | Host almost completely locked |
+| Easy to modify, easy to break | Controlled modification model | Very resistant to accidental breakage |
+| Package sprawl over time | Clear separation of responsibilities | Strong separation enforced by design |
+| Rollback is manual | Snapper snapshots + rollback | Atomic image rollback |
+| Very flexible | Flexible where it matters | More opinionated workflow |
+
+For a personal workstation, this balance is often more comfortable than a strict immutable workflow because it preserves flexibility without giving up reproducibility and rollback safety.
+
 
 ### Advantages of this hybrid approach
 
@@ -1029,7 +1058,7 @@ QEMU/KVM needs host-level integration (kernel modules, libvirt daemon, network b
 **Why you want it:**
 - Test Ubuntu/Debian/Arch VMs without dual-booting
 - Validate Docker Swarm or Kubernetes setups against fresh OS images
-- Reproduce customer/CI environments for debugging
+- Reproduce clean Linux environments for testing and troubleshooting
 - (Advanced) GPU passthrough to a Windows VM — possible on Pascal with caveats
 
 - [ ] Install virtualization packages on the host:
@@ -1158,7 +1187,7 @@ Homebrew has GPG (`brew install gnupg`), but it ships an isolated GPG keyring un
 
 > **Make:** `make phase5-distrobox-config` · `make phase5-distrobox-dev` — **no target:** `dnf install` inside containers (run after `distrobox enter`)
 
-This is where your "mutable development" lives — completely isolated from the host. Distrobox should already be on your `PATH` from Phase 3 (`brew install distrobox`) or Phase 1 (`dnf` / `make phase1-podman`).
+This is where your isolated development environments live — completely separated from the host OS. Distrobox should already be on your `PATH` from Phase 3 (`brew install distrobox`) or Phase 1 (`dnf` / `make phase1-podman`).
 
 - [ ] Verify Distrobox and Podman:
   ```bash
@@ -1461,7 +1490,7 @@ Chezmoi covers config-as-code. Other things need their own backup strategy:
 - Anything you'd care about losing
 
 **Has its own native sync:**
-- KWallet → consider exporting to Proton Pass for cross-device access
+- KWallet — this is a **system secrets service** (like macOS Keychain), not a password manager. It stores app tokens, WiFi/VPN credentials, and browser session data written into it automatically by apps. There is no clean bulk export path to Proton Pass, nor is one needed: app credentials re-populate when you log back into each app on a new machine. For passwords you want across devices, add them to Proton Pass directly. If you have manually-saved entries in KWallet Manager, you can inspect them with `kwallet-query -l kdewallet` and export individual entries with `kwallet-query -r <folder> -e <entry> kdewallet` — these are rare in practice.
 - Browser data → Vivaldi Sync or Firefox Sync
 
 **Btrfs snapshots (Snapper) handle:**
