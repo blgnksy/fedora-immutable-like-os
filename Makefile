@@ -1,5 +1,5 @@
 # Fedora KDE immutable-like workstation — setup & maintenance
-# Docs: ~/fedora-kde-immutable-like-setup.md
+# Docs: ~/setup/README.md
 # Usage:  cd ~/setup && make help
 #         make -C ~/setup phase1-all
 #         make -C ~/setup update
