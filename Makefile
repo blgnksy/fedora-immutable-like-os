@@ -53,6 +53,7 @@ help-setup: ## Show one-time setup targets (phases 0–7)
 	@echo ""
 	@echo "=== Phase 1 (host) ==="
 	@echo "  phase1-all             dnf tweaks + ssh + debug + rpmfusion + nvidia + podman + codecs"
+	@echo "  phase1-podman          podman (dnf); distrobox via brew if present, else dnf"
 	@echo "  phase1-dnf-tweaks      DNF speed + sslcacert"
 	@echo "  phase1-upgrade         dnf upgrade (then reboot manually)"
 	@echo "  phase1-ssh             openssh + hardening (needs SSH key first!)"
@@ -70,7 +71,7 @@ help-setup: ## Show one-time setup targets (phases 0–7)
 	@echo ""
 	@echo "=== Phase 3 (brew) — partial ==="
 	@echo "  phase3-brew-deps       git gcc make (for Homebrew installer)"
-	@echo "  phase3-brew-cli        daily CLI formulas (needs brew installed)"
+	@echo "  phase3-brew-cli        daily CLI formulas + distrobox (needs brew installed)"
 	@echo "  phase3-brew-tap        ublue-os/tap + VS Code cask"
 	@echo "  (manual: Homebrew install, oh-my-zsh, chsh — interactive)"
 	@echo ""
@@ -99,7 +100,7 @@ phase0-verify: ## Verify Btrfs after Anaconda install
 
 # --- Verification ---
 
-phase1-verify: ## Verify phase 1 host packages (no GPU smoke test)
+phase1-verify: ## Verify phase 1 host packages (no GPU smoke test; do not use sudo)
 	bash $(SCRIPTS)/verify.sh phase1
 
 phase1-verify-gpu: ## Verify NVIDIA + VA-API + podman GPU (after reboot)
@@ -184,9 +185,9 @@ phase1-nvidia-toolkit: ## nvidia-container-toolkit repo + packages
 		libnvidia-container-tools-$(NVIDIA_CONTAINER_TOOLKIT_VERSION) \
 		libnvidia-container1-$(NVIDIA_CONTAINER_TOOLKIT_VERSION)
 
-phase1-podman: ## podman + distrobox on host
+phase1-podman: ## podman on host; distrobox via brew or dnf
 	rpm -q podman >/dev/null 2>&1 || $(DNF) install -y podman podman-compose
-	rpm -q distrobox >/dev/null 2>&1 || $(DNF) install -y distrobox
+	DNF='$(DNF)' BREW='$(BREW)' bash $(SCRIPTS)/distrobox-ensure.sh
 
 phase1-cdi: ## Generate /etc/cdi/nvidia.yaml
 	sudo mkdir -p /etc/cdi
@@ -240,7 +241,7 @@ phase3-brew-deps: ## git gcc make for Homebrew
 
 phase3-brew-cli: ## Daily CLI via brew (requires brew in PATH)
 	@command -v brew >/dev/null || { echo "Install Homebrew first"; exit 1; }
-	brew install neovim tmux ripgrep fd fzf bat eza jq yq htop btop tree wget curl lazygit lazydocker starship direnv gh zsh
+	brew install neovim tmux ripgrep fd fzf bat eza jq yq htop btop tree wget curl lazygit lazydocker starship direnv gh zsh distrobox
 
 phase3-brew-tap: ## ublue tap + VS Code cask
 	brew tap ublue-os/tap

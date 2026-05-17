@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 # Post-install verification for workstation setup phases.
 # Usage: verify.sh <phase0|phase1|phase1-gpu|phase2|phase3|phase4|phase5|phase6|all>
+# Do not use sudo — host checks need no root; sudo breaks brew and ~/.local paths.
 set -uo pipefail
+
+SETUP_VERIFY_SCRIPT="$(readlink -f "${BASH_SOURCE[0]}")"
+# shellcheck source=setup-user-env.sh
+source "$(dirname "${BASH_SOURCE[0]}")/setup-user-env.sh"
 
 FAIL=0
 WARN=0
@@ -38,25 +43,24 @@ section() {
 phase0() {
   section "Phase 0 — Btrfs layout"
   check "Root is btrfs" test "$(findmnt -no FSTYPE /)" = "btrfs"
-  check_warn "Home subvolume mount" findmnt -no SUBVOLNAME /home 2>/dev/null | grep -qx home
+  check_warn "Home subvolume mount" bash -c 'findmnt -no SUBVOLNAME /home 2>/dev/null | grep -qx home'
 }
 
 phase1() {
   section "Phase 1 — host (pre-GPU checks)"
   check "DNF fastestmirror enabled" grep -q '^fastestmirror=True' /etc/dnf/dnf.conf
   check "DNF max_parallel_downloads" grep -q '^max_parallel_downloads=' /etc/dnf/dnf.conf
-  check "RPM Fusion free repo" test -f /etc/yum.repos.d/rpmfusion-free-updates.repo || \
-    ls /etc/yum.repos.d/rpmfusion-free*.repo &>/dev/null
+  check "RPM Fusion free repo" bash -c 'test -f /etc/yum.repos.d/rpmfusion-free-updates.repo || ls /etc/yum.repos.d/rpmfusion-free*.repo &>/dev/null'
   check "openssh-server installed" rpm -q openssh-server
   check "sshd active" systemctl is-active sshd
-  check "sshd hardening drop-in" test -f /etc/ssh/sshd_config.d/00-hardening.conf
+  check "sshd hardening drop-in (run: make phase1-ssh)" bash "$(dirname "${BASH_SOURCE[0]}")/sshd-hardening-ok.sh"
   check "gdb installed" rpm -q gdb
   check "NVIDIA 580xx akmod package" rpm -q akmod-nvidia-580xx
   check "Podman installed" rpm -q podman
-  check "Distrobox installed" rpm -q distrobox
+  check "Distrobox installed (dnf or brew)" bash "$(dirname "${BASH_SOURCE[0]}")/distrobox-available.sh"
   check "CDI spec exists" test -f /etc/cdi/nvidia.yaml
   check_warn "nvidia-ctk lists GPUs" nvidia-ctk cdi list
-  check "refresh-cdi script" test -x "${HOME}/.local/bin/refresh-cdi"
+  check "refresh-cdi script (run: make phase1-refresh-cdi-script)" test -x "${SETUP_HOME}/.local/bin/refresh-cdi"
   check_warn "ffmpeg (not ffmpeg-free)" rpm -q ffmpeg
   check_warn "fail2ban (optional)" systemctl is-active fail2ban
 }
@@ -89,31 +93,31 @@ phase3() {
   if command -v brew >/dev/null 2>&1; then
     check_warn "brew zsh" brew --prefix zsh 2>/dev/null
     check_warn "neovim via brew" brew list neovim 2>/dev/null
-    check_warn "ublue tap" brew tap 2>/dev/null | grep -q ublue-os/tap
+    check_warn "ublue tap" bash -c 'brew tap 2>/dev/null | grep -q ublue-os/tap'
   fi
   check_warn "Brew zsh is login shell" bash -c '[[ "$(getent passwd "$USER" | cut -d: -f7)" == *linuxbrew*zsh* ]]'
-  check_warn "oh-my-zsh" test -d "${HOME}/.oh-my-zsh"
+  check_warn "oh-my-zsh" test -d "${SETUP_HOME}/.oh-my-zsh"
 }
 
 phase4() {
   section "Phase 4 — Flatpak + host GUI exceptions"
-  check_warn "Flathub remote" flatpak remote-list | grep -q flathub
+  check_warn "Flathub remote" bash -c 'flatpak remote-list | grep -q flathub'
   check_warn "qemu-kvm" rpm -q qemu-kvm
   check_warn "virt-manager" rpm -q virt-manager
   check_warn "libvirt group (re-login if missing)" bash -c 'id -nG "$USER" | grep -qw libvirt'
   check_warn "libvirtd active" systemctl is-active libvirtd
   check_warn "gnupg2 + kgpg" rpm -q gnupg2 kgpg
-  check_warn "pinentry-qt in gpg-agent.conf" grep -q pinentry-qt "${HOME}/.gnupg/gpg-agent.conf" 2>/dev/null
+  check_warn "pinentry-qt in gpg-agent.conf" grep -q pinentry-qt "${SETUP_HOME}/.gnupg/gpg-agent.conf" 2>/dev/null
   check_warn "okular for PDF signing" rpm -q okular
 }
 
 phase5() {
   section "Phase 5 — Distrobox"
-  check "distrobox.conf" test -f "${HOME}/.config/distrobox/distrobox.conf"
-  check_warn "/var/mount in distrobox.conf" grep -q '/var/mount' "${HOME}/.config/distrobox/distrobox.conf"
-  if command -v distrobox >/dev/null 2>&1; then
-  check_warn "dev container exists" distrobox list 2>/dev/null | grep -qw dev
-  check_warn "deepstream container exists" distrobox list 2>/dev/null | grep -qw deepstream
+  check "distrobox.conf" test -f "${SETUP_HOME}/.config/distrobox/distrobox.conf"
+  check_warn "/var/mount in distrobox.conf" grep -q '/var/mount' "${SETUP_HOME}/.config/distrobox/distrobox.conf"
+  if bash "$(dirname "${BASH_SOURCE[0]}")/distrobox-available.sh"; then
+    check_warn "dev container exists" bash -c 'distrobox list 2>/dev/null | grep -qw dev'
+    check_warn "deepstream container exists" bash -c 'distrobox list 2>/dev/null | grep -qw deepstream'
   fi
 }
 

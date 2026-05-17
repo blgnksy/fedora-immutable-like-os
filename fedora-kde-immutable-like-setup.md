@@ -2,14 +2,14 @@
 
 > **Goal:** Fedora KDE Workstation with GTX 1070 (Pascal), behaving as close to an atomic/immutable OS as possible. Minimize *ongoing* `dnf` usage on the host after initial setup. Use Homebrew for CLI tools, Flatpak for GUI apps, Distrobox/Toolbox for dev environments, and Btrfs snapshots for rollback safety.
 >
-> **Mental model:** This is a **snapshot-backed minimal host**, not a true immutable OS (Silverblue/Kinoite). Phase 1 is intentionally a large one-time `dnf` wave (drivers, codecs, Podman, Distrobox). Phases 3–5 add user-space layers; Phase 6 locks the host down.
+> **Mental model:** This is a **snapshot-backed minimal host**, not a true immutable OS (Silverblue/Kinoite). Phase 1 is intentionally a large one-time `dnf` wave (drivers, codecs, Podman). Phases 3–5 add user-space layers (Homebrew CLI including Distrobox, Flatpak, containers); Phase 6 locks the host down.
 
 **Setup waves (read this first):**
 
 | Wave | Phase | What |
 |------|-------|------|
-| A — Host (once) | 1–2 | NVIDIA, Snapper, SSH, Podman/CDI, Distrobox, codecs, virt, crypto |
-| B — User CLI | 3 | Development Tools → Homebrew → zsh → Brewfile |
+| A — Host (once) | 1–2 | NVIDIA, Snapper, SSH, Podman/CDI, codecs, virt, crypto |
+| B — User CLI | 3 | Development Tools → Homebrew → zsh → Brewfile (incl. Distrobox) |
 | C — Apps & dev | 4–5 | Flatpak GUIs, Distrobox containers, exports |
 | D — Lockdown | 6–7 | dnf guard, automatic security updates, dotfiles |
 
@@ -40,7 +40,7 @@ make -C ~/setup <target>     # from any directory
 | All | — | `make -C ~/setup verify-all` |
 | Day-2 | `make -C ~/setup update` `health` | No host `dnf` |
 
-**Notes:** `phase1-all` and `phase2-all` run their verify step automatically. Failures exit non-zero; **WARN** lines are advisory (optional packages, post-reboot checks, manual steps). Phase 1 host wave still needs `phase1-upgrade` + **reboot** before `phase1-verify-gpu`.
+**Notes:** `phase1-all` and `phase2-all` run their verify step automatically. Failures exit non-zero; **WARN** lines are advisory (optional packages, post-reboot checks, manual steps). Phase 1 host wave still needs `phase1-upgrade` + **reboot** before `phase1-verify-gpu`. Run `make … phaseN-verify` **without sudo** (root breaks Homebrew and `~/.local` checks; if you used `sudo make`, verify re-runs as your user automatically).
 
 Layout: `~/setup/Makefile`, `~/setup/scripts/*.sh`, this guide at `~/fedora-kde-immutable-like-setup.md`. Skipped steps (ISO install, `ssh-copy-id`, interactive installers) have no target — see `make -C ~/setup help-setup`.
 
@@ -371,11 +371,12 @@ System debuggers and profilers need kernel-level access (perf counters, ptrace, 
   podman --version
   ```
 
-- [ ] **Distrobox** — install on the host now (launcher for Phase 5 dev containers; not a Brew package at this stage):
+- [ ] **Distrobox** — launcher for Phase 5 dev containers. Prefer **Homebrew** (Phase 3: `brew install distrobox` or `make phase3-brew-cli`); `make phase1-podman` falls back to `dnf` only if Brew is not installed yet:
   ```bash
-  rpm -q distrobox || sudo dnf install -y distrobox
+  command -v distrobox >/dev/null || rpm -q distrobox || brew install distrobox || sudo dnf install -y distrobox
   distrobox --version
   ```
+  Verification accepts any of: `distrobox` on `PATH`, `rpm -q distrobox`, or `brew list distrobox`.
 
 - [ ] **Generate the CDI specification** for NVIDIA GPUs. CDI (Container Device Interface) is the modern, runtime-agnostic way to expose devices to containers — replaces the old Docker-specific `--gpus` flag:
   ```bash
@@ -792,6 +793,12 @@ From here on, **avoid `dnf` for user-space tools** (Phase 6 adds a guard). Homeb
   brew install podman-compose
   ```
 
+- [ ] **Distrobox** via Brew (recommended — keeps the host `dnf` footprint smaller; `phase1-verify` accepts Brew or RPM):
+  ```bash
+  brew install distrobox
+  distrobox --version
+  ```
+
 - [ ] Install your daily CLI tools via Brew:
   ```bash
   brew install \
@@ -813,7 +820,8 @@ From here on, **avoid `dnf` for user-space tools** (Phase 6 adds a guard). Homeb
     lazydocker \
     starship \
     direnv \
-    gh            # GitHub CLI
+    gh \
+    distrobox    # dev container launcher (Phase 5)
   ```
 
 - [ ] **Add the Universal Blue tap** for Linux-specific casks (IDEs, GUI apps that don't sandbox well as Flatpaks):
@@ -1087,7 +1095,7 @@ Homebrew has GPG (`brew install gnupg`), but it ships an isolated GPG keyring un
 
 > **Make:** `make -C ~/setup phase5-distrobox-config` · `make phase5-distrobox-dev` · `make phase5-distrobox-deepstream` — **no target:** `dnf install` inside containers (run after `distrobox enter`)
 
-This is where your "mutable development" lives — completely isolated from the host. Distrobox should already be installed from Phase 1.
+This is where your "mutable development" lives — completely isolated from the host. Distrobox should already be on your `PATH` from Phase 3 (`brew install distrobox`) or Phase 1 (`dnf` / `make phase1-podman`).
 
 - [ ] Verify Distrobox and Podman:
   ```bash
@@ -1346,7 +1354,7 @@ sudo chattr +i /etc/yum.repos.d/*.repo
 ---
 
 ## Phase 7: Dotfiles & Reproducibility
-
+!!! this script is missing
 > **Make:** `make -C ~/setup phase7-brewfile-dump` — **no target:** chezmoi init, `host-setup.sh` (documentation only)
 
 Make your entire setup reproducible so you can rebuild from scratch.
@@ -1359,17 +1367,17 @@ Make your entire setup reproducible so you can rebuild from scratch.
 
 - [ ] Track these in your dotfiles repo:
   - `~/.zshrc`, `~/.zsh_aliases`, `~/.zsh_functions`
-  - `~/.config/starship.toml` (if using Starship)
   - `~/.tmux.conf`
   - `~/.config/nvim/` (Neovim config)
   - `~/.gitconfig`, `~/.gitignore_global`
   - `~/.ssh/config` (NOT private keys — manage separately)
   - `~/.gdbinit` and any GDB scripts (your STL pretty-printers, GStreamer/DeepStream helpers, kernel data traversal commands)
-  - `~/distrobox.ini`
+  - `~/.config/distrobox/distrobox.conf`
   - `~/Brewfile`
   - `~/setup/Makefile` + `~/setup/scripts/` (automation — `make -C ~/setup help`)
   - VS Code: `vscode-extensions.txt` (export with `code --list-extensions`)
-  - `host-setup.sh` (your one-time dnf installs)
+  - Cursor: `vscode-extensions.txt` (export with `code --list-extensions`)
+  - `host-setup.sh` (your one-time dnf installs) !!! where is this script
 
 ### What to Back Up (Beyond Dotfiles)
 
@@ -1406,6 +1414,7 @@ Chezmoi covers config-as-code. Other things need their own backup strategy:
 - Test restore at least once — untested backups don't count
 
 - [ ] Create a **Brewfile** for reproducible Brew installs:
+!!! where is this step in makefile
   > **Make:** `make -C ~/setup phase7-brewfile-dump`
   ```bash
   brew bundle dump --file=~/Brewfile
@@ -1416,6 +1425,7 @@ Chezmoi covers config-as-code. Other things need their own backup strategy:
 - [ ] Document your one-time `dnf` setup in a `host-setup.sh` script:
   ```bash
   #!/bin/bash
+  !!! where is this script
   # host-setup.sh — Run once after fresh Fedora KDE install
   # 1. DNF speed tweaks (fastestmirror, max_parallel_downloads, defaultyes, keepcache)
   # 2. SSH server (sshd + firewalld + hardened config + optional fail2ban)
@@ -1443,7 +1453,7 @@ Chezmoi covers config-as-code. Other things need their own backup strategy:
 | Debug tools (gdb, perf, strace) | Host (`dnf`)    | One-time    |
 | NVIDIA driver + CDI spec     | Host (`dnf`)       | One-time    |
 | Podman (primary engine)      | Host (`dnf` if missing) | One-time |
-| Distrobox (dev launcher)     | Host (`dnf`)       | One-time    |
+| Distrobox (dev launcher)     | Homebrew or host `dnf` | One-time |
 | Docker (Swarm only, optional)| Host (`dnf`)       | One-time    |
 | Snapper, btrfs-assistant     | Host (`dnf`)       | One-time    |
 | grub-btrfs (GRUB snapshots)  | Host (build from Antynea git; COPR incomplete on F44) | One-time |
@@ -1482,6 +1492,7 @@ The ublue-os tap is additive — your normal `brew install <thing>` keeps workin
 ├──────────────────────────────────────────────────┤
 │          Fedora KDE 44 Host (minimal dnf)         │
 │  NVIDIA 580xx · Podman · CDI · Snapper            │
+│  (Distrobox via Homebrew, not host dnf)           │
 └──────────────────────────────────────────────────┘
 ```
 
