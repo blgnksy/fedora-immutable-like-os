@@ -966,7 +966,7 @@ Knowing this saves confusion later:
 
 ## Phase 4: GUI Applications via Flatpak
 
-> **Make:** `make phase4-flathub` · `make phase4-flatpak-apps` · `make phase4-virt` · `make phase4-crypto` · `make phase4-okular` · `make phase4-flatpak-xdg` (KDE menu fix)
+> **Make:** `make phase4-flathub` · `make phase4-flatpak-apps` · `make phase4-plasma-widgets` · `make phase4-virt` · `make phase4-crypto` · `make phase4-okular` · `make phase4-flatpak-xdg` (KDE menu fix)
 
 All GUI apps should come from Flathub. No `dnf` for desktop applications. (Host exceptions below use `sudo dnf` until Phase 6; after Phase 6 use `sudo dnf-host`.)
 
@@ -1039,6 +1039,7 @@ flatpak install -y flathub io.dbeaver.DBeaverCommunity
 **System utilities:**
 ```bash
 flatpak install -y flathub org.localsend.localsend_app
+flatpak install -y flathub io.github.maniacx.BudsLink
 ```
 
 **Optional / situational:**
@@ -1049,6 +1050,25 @@ flatpak install -y flathub io.github.nokse22.tomatillo
 List installed apps:
 ```bash
 flatpak list --app --columns=application,name
+```
+
+### KDE Plasma Widgets
+
+For desktop enhancements, hardware control widgets, and utility applets.
+
+> **Make:** `make phase4-plasma-widgets`
+
+#### BudsLink Plasma Widget (Companion)
+
+Integrates your Galaxy Buds controls directly into the KDE system tray / panel.
+
+```bash
+wget https://github.com/maniacx/BudsLink-Companion/archive/refs/heads/Plasma-Widget.zip
+unzip Plasma-Widget.zip
+cd BudsLink-Companion-Plasma-Widget
+chmod +x install.sh
+./install.sh
+systemctl restart --user plasma-plasmashell
 ```
 
 ### Virtualization (Host Exception)
@@ -1906,3 +1926,56 @@ findmnt -R /var/mount
 mount | grep /var/mount
 sudo journalctl -b -u 'var-mount-*' --no-pager   # if using systemd .mount units
 ```
+
+
+
+
+
+
+
+The issue is the **auto-hide** behavior. Your `grub.cfg` contains this logic:
+
+```
+elif [ "${menu_auto_hide}" -a "${menu_hide_ok}" = "1" ]; then
+  set timeout_style=hidden
+  set timeout=1
+```
+
+Since your last boot was successful (`boot_success=1`), GRUB hides the menu automatically. You never see it.
+
+**Fix: add `GRUB_TIMEOUT_STYLE=menu` to `/etc/default/grub`**, then regenerate:
+
+```bash
+# Edit the file
+sudo nano /etc/default/grub
+```
+
+Add/change this line:
+```
+GRUB_TIMEOUT_STYLE=menu
+```
+
+Then regenerate the config:
+```bash
+sudo grub2-mkconfig -o /boot/grub2/grub.cfg
+```
+
+This forces the menu to always show (for the 15 seconds you already have set in `GRUB_TIMEOUT=15`), regardless of whether the last boot succeeded.
+
+---
+
+**Alternatively**, if you don't want to always see the menu on every boot, you can just **hold `Esc` or `Shift`** during boot to interrupt the hidden timeout and force the menu to appear. But since you want to access snapshots regularly, the explicit `GRUB_TIMEOUT_STYLE=menu` is the cleaner solution.
+
+
+➜  ~ sudo grub2-editenv /boot/grub2/grubenv list
+[sudo] password for blgnksy: 
+saved_entry=b450c693d94c41dab9d9c96e73ffa7cf-7.0.9-205.fc44.x86_64
+menu_auto_hide=1
+boot_success=0
+boot_indeterminate=0
+➜  ~ sudo grub2-editenv /boot/grub2/grubenv unset menu_auto_hide
+➜  ~ sudo grub2-editenv /boot/grub2/grubenv list                
+saved_entry=b450c693d94c41dab9d9c96e73ffa7cf-7.0.9-205.fc44.x86_64
+boot_success=0
+boot_indeterminate=0
+➜  ~ 

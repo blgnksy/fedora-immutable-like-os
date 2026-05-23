@@ -1,8 +1,8 @@
 # Fedora KDE immutable-like workstation — setup & maintenance
 # Docs: ~/setup/README.md
 # Usage:  cd ~/setup && make help
-#         make -C ~/setup phase1-all
-#         make -C ~/setup update
+#         make phase1-all
+#         make update
 
 SHELL := /bin/bash
 MAKEFLAGS += --no-print-directory
@@ -23,7 +23,7 @@ BREW := $(shell test -x /home/linuxbrew/.linuxbrew/bin/brew && echo /home/linuxb
 	phase2-all phase2-snapper phase2-snapper-timers phase2-snapper-retention \
 	phase2-grub-btrfs phase2-grub-test \
 	phase3-brew-deps phase3-brew-cli phase3-brew-tap phase3-brew-casks \
-	phase4-flathub phase4-flatpak-apps phase4-flatpak-xdg phase4-virt \
+	phase4-flathub phase4-flatpak-apps phase4-flatpak-xdg phase4-plasma-widgets phase4-virt \
 	phase4-crypto phase4-okular phase4-smartcard \
 	phase5-distrobox-config phase5-distrobox-dev phase5-distrobox-deepstream \
 	phase6-dnf-automatic phase6-nvidia-versionlock phase6-dnf-guard \
@@ -36,13 +36,13 @@ BREW := $(shell test -x /home/linuxbrew/.linuxbrew/bin/brew && echo /home/linuxb
 
 help: ## Show maintenance targets (day-2)
 	@grep -E '^[a-zA-Z0-9_.-]+:.*##' $(MAKEFILE_LIST) | grep -v help-setup | \
-		sed 's|.*/Makefile://; s/:.*## /  /' | sort
+		sed 's|.*/Makefile:||; s/:.*## /  /' | sort
 	@echo ""
-	@echo "Setup targets: make -C ~/setup help-setup"
+	@echo "Setup targets: make help-setup"
 	@echo "DNF wrapper:   $(DNF)"
 
 help-setup: ## Show one-time setup targets (phases 0–7)
-	@echo "Run from: make -C ~/setup <target>"
+	@echo "Run from: make <target>"
 	@echo ""
 	@echo "=== Phase 0 ==="
 	@echo "  phase0-verify          Btrfs layout check"
@@ -78,6 +78,7 @@ help-setup: ## Show one-time setup targets (phases 0–7)
 	@echo "=== Phase 4 ==="
 	@echo "  phase4-flathub         enable Flathub"
 	@echo "  phase4-flatpak-apps    install recommended flatpaks"
+	@echo "  phase4-plasma-widgets  install KDE plasma widgets"
 	@echo "  phase4-virt            qemu/libvirt"
 	@echo "  phase4-crypto          gnupg kgpg kleopatra"
 	@echo ""
@@ -101,6 +102,27 @@ help-setup: ## Show one-time setup targets (phases 0–7)
 	@echo ""
 	@echo "Skipped (manual only): ISO install, reboot, ssh-copy-id, chsh,"
 	@echo "  Homebrew install, oh-my-zsh, GPG keygen, VS Code sync, PDF sign in Okular"
+
+help-maint: ## Show maintenance targets (day-2)
+	@echo "Run from: make <target>"
+	@echo ""
+	@echo "=== Maintenance targets (day-2) ==="
+	@echo "  update                  Flatpak + Brew + Distrobox updates"
+	@echo "  flatpak-update          flatpak update -y"
+	@echo "  brew-update             brew update && upgrade"
+	@echo "  distrobox-update         distrobox upgrade --all --yes"
+	@echo "  update-host             Host dnf upgrade + refresh-gpu"
+	@echo "  snapper-list            snapper list"
+	@echo "  snapper-cleanup         snapper-cleanup.service"
+	@echo "  snapper-timers          Show snapper timer status"
+	@echo "  snapper-undo            snapper undochange (PRE=1 POST=2)"
+	@echo "  refresh-gpu             Regenerate CDI spec"
+	@echo "  gpu-test                Rootless podman GPU smoke test"
+	@echo "  clean                   Cleanup brew/podman/snapper"
+	@echo "  podman-prune            podman system prune -f"
+	@echo "  health                  grub-btrfsd + snapper + grub.cfg"
+	@echo "  status                  mounts snapper-list snapper-timers"
+	@echo "  mounts                  /var/mount + noexec check"
 
 # --- Phase 0 ---
 
@@ -140,7 +162,7 @@ phase1-all: phase1-dnf-tweaks phase1-ssh phase1-debug phase1-rpmfusion \
 	phase1-cdi phase1-refresh-cdi-script phase1-codecs phase1-vaapi
 	@echo "Phase 1 automated steps done. Manual: phase1-upgrade + reboot, optional fail2ban."
 	@$(MAKE) phase1-verify
-	@echo "After reboot: make -C ~/setup phase1-verify-gpu"
+	@echo "After reboot: make phase1-verify-gpu"
 
 phase1-dnf-tweaks: ## DNF speed + sslcacert
 	bash $(SCRIPTS)/dnf-speed-tweaks.sh
@@ -268,7 +290,18 @@ phase4-flatpak-apps: phase4-flathub ## Recommended flatpak set
 	flatpak install -y flathub io.github.kolunmi.Bazaar io.github.flattool.Warehouse com.github.tchx84.Flatseal || true
 	flatpak install -y flathub com.vivaldi.Vivaldi org.mozilla.firefox || true
 	flatpak install -y flathub net.cozic.joplindesktop org.collabora.Office com.nextcloud.desktopclient.nextcloud || true
-	flatpak install -y flathub org.videolan.VLC io.dbeaver.DBeaverCommunity org.localsend.localsend_app || true
+	flatpak install -y flathub org.videolan.VLC io.dbeaver.DBeaverCommunity org.localsend.localsend_app io.github.maniacx.BudsLink || true
+
+phase4-plasma-widgets: ## Install KDE Plasma widgets (BudsLink, etc.)
+	@echo "Installing BudsLink Plasma Widget..."
+	@tmpdir=$$(mktemp -d) && \
+		trap 'rm -rf "$$tmpdir"' EXIT && \
+		wget -q -O "$$tmpdir/Plasma-Widget.zip" https://github.com/maniacx/BudsLink-Companion/archive/refs/heads/Plasma-Widget.zip && \
+		unzip -q "$$tmpdir/Plasma-Widget.zip" -d "$$tmpdir" && \
+		cd "$$tmpdir"/*/ && \
+		chmod +x install.sh && \
+		./install.sh && \
+		systemctl restart --user plasma-plasmashell || true
 
 phase4-flatpak-xdg: ## KDE menu fix for flatpaks (set USER=yourname if needed)
 	@test -n "$(USER)" || { echo "Set USER in environment"; exit 1; }
@@ -356,14 +389,14 @@ distrobox-update: ## distrobox upgrade --all
 
 update-host: ## Host dnf upgrade + refresh-gpu
 	$(DNF) upgrade --refresh -y
-	$(MAKE) -C $(SETUP_DIR) refresh-gpu
+	$(MAKE) refresh-gpu
 
 snapper-list: ## snapper list
 	snapper list
 
 snapper-cleanup: ## snapper-cleanup.service
 	sudo systemctl start snapper-cleanup.service
-	$(MAKE) -C $(SETUP_DIR) snapper-list
+	$(MAKE) snapper-list
 
 snapper-timers: ## Show snapper timer status
 	systemctl list-timers 'snapper-*' --no-pager
@@ -373,7 +406,7 @@ snapper-undo: ## snapper undochange (PRE=1 POST=2)
 	snapper undochange $(PRE)..$(POST)
 
 refresh-gpu: ## Regenerate CDI spec
-	@command -v refresh-cdi >/dev/null || { echo "Run: make -C ~/setup phase1-refresh-cdi-script"; exit 1; }
+	@command -v refresh-cdi >/dev/null || { echo "Run: make phase1-refresh-cdi-script"; exit 1; }
 	~/.local/bin/refresh-cdi
 
 gpu-test: ## Rootless podman GPU smoke test
