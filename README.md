@@ -1638,30 +1638,6 @@ The ublue-os tap is additive — your normal `brew install <thing>` keeps workin
 
 ---
 
-## Summary: The Layered Model
-
-```
-┌──────────────────────────────────────────────────┐
-│            GUI Apps (Flatpak/Flathub)            │
-├──────────────────────────────────────────────────┤
-│        CLI Tools (Homebrew in ~/linuxbrew)       │
-├──────────────────────────────────────────────────┤
-│      Dev Environments (Distrobox / Toolbox)      │
-├──────────────────────────────────────────────────┤
-│    GPU Workloads (Podman + CDI nvidia.com/gpu)   │
-├──────────────────────────────────────────────────┤
-│   Btrfs Snapshots (Snapper — auto pre/post DNF)  │
-├──────────────────────────────────────────────────┤
-│         Fedora KDE 44 Host (minimal dnf)         │
-│       NVIDIA 580xx · Podman · CDI · Snapper      │
-│      (Distrobox via Homebrew, not host dnf)      │
-└──────────────────────────────────────────────────┘
-```
-
-The host stays almost untouched after initial setup. Brew, Flatpak, Distrobox, and Podman give you four isolated layers on top. Snapper gives you rollback. This is as close to atomic as you can get while keeping full NVIDIA Pascal support — and with rootless Podman + CDI, your containers don't even need root privileges to access the GPU.
-
----
-
 ## Appendix A: Fedora 44 Gotchas
 
 ### CA certificate bundle path (DNF, curl, msmtp)
