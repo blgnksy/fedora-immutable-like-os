@@ -1,23 +1,87 @@
 # Fedora KDE Plasma Desktop 44 — "Immutable-Like" Developer Workstation Setup
 
-> **Goal:** Fedora KDE Plasma Desktop with Nvidia GPU (GTX 1070), behaving as close to an atomic/immutable OS as possible. Minimize *ongoing* `dnf` usage on the host after initial setup. Use Homebrew for CLI tools, Flatpak for GUI apps, Distrobox/Toolbox for dev environments and for some application that no need to be installed on host directly that is also not available via brew formula (keep this state for clean/reproducible OS setup), and Btrfs snapshots for rollback safety.
->
-> **Mental model:** This is a **snapshot-backed minimal host**, not a true immutable OS (Silverblue/Kinoite). Phase 1 is intentionally a large one-time `dnf` wave (drivers, codecs, Podman). Phases 3–5 add user-space layers (Homebrew CLI including Distrobox, Flatpak, containers); Phase 6 locks the host down. Phase 7 finalizes reproducibility: Brewfile dump, chezmoi dotfiles, and the `host-setup.sh` orchestration script.
+> **The Architectural Philosophy:** Keep the foundation boring, stable, and highly secure. Elevate application runtimes, developer environments, and CLI suites to isolated, user-space layers. Drive everything through deterministic, version-controlled configuration.
 
 ---
 
-## Why This Approach?
+## 🎯 The Goal
+
+To establish a highly optimized, high-performance developer workstation using **Fedora KDE Plasma Desktop** and an **NVIDIA GPU (Pascal Architecture / GTX 1070)** that behaves as close to a modern atomic/immutable operating system as possible. 
+
+This is achieved by implementing four core architectural pillars:
+
+```mermaid
+graph TD
+    A[User Space / GUI] -->|Flatpak / Sandbox| B(Host OS / Core System)
+    C[User Space / CLI] -->|Homebrew / User Land| B
+    D[Development Runtimes] -->|Distrobox / Podman| B
+    B -->|Btrfs Snapshots| E[Snapper Transactional Rollback]
+```
+
+1. **Zero Host Drift:** Minimize ongoing host modification. After the initial boot and setup wave, `dnf` on the host is locked down. The host OS acts strictly as an unpolluted, bare-metal hardware abstraction layer (kernel, legacy drivers, container engines).
+2. **Layered Responsibility:** Enforce a strict decoupling of roles. Universal CLI utilities live in **Homebrew**, desktop applications live in **Flatpak**, and mutable developer runtimes run isolated inside **Distrobox**.
+3. **Frictionless Legacy Hardware Integration:** Secure maximum performance and reliability from legacy NVIDIA cards (580xx branch) without encountering the compilation issues and layout friction typical of ostree-based systems.
+4. **Deterministic Reproducibility:** Ensure the complete desktop environment, tool suite, and configuration can be rebuilt programmatically in minutes from a single configuration using `chezmoi` dotfiles, `Brewfile` manifests, and container definitions.
+
+---
+
+## 🧠 The Mental Model
+
+This system is built as a **snapshot-backed minimal host**, offering a robust alternative to fully immutable operating systems (such as Fedora Silverblue or Kinoite). Instead of enforcing a read-only filesystem via hardware or kernel blocks, we establish a **disciplined layer separation** reinforced by tooling and user habit.
+
+### System Architecture
+
+```mermaid
+graph TB
+    subgraph User_Space [User Space - Portable & Disposed]
+        Flatpak[GUI Applications<br><i>Flatpak / Flathub</i>]
+        Brew[CLI Development Tools<br><i>Homebrew / ~/.linuxbrew</i>]
+        Distrobox[Development Sandboxes<br><i>Distrobox / Podman</i>]
+    end
+
+    subgraph Host_OS [Host OS - Boring & Durable]
+        direction TB
+        KDE[KDE Plasma Desktop & Wayland]
+        Drivers[NVIDIA 580xx Legacy Drivers & Codecs]
+        Kernel[Linux Kernel, SELinux, Systemd, virtualization]
+        Btrfs[Btrfs Filesystem Layout / /var/mount]
+    end
+
+    subgraph Safety_Net [Rollback Layer - Transactional]
+        Snapper[Snapper / grub-btrfs<br><i>Bootable transactional snapshots</i>]
+    end
+
+    Flatpak --> KDE
+    Brew --> Drivers
+    Distrobox -->|GPU Passthrough / CDI| Drivers
+    Distrobox -->|Mounts| Btrfs
+    Host_OS === Safety_Net
+```
+
+### Layer Lifecycle & Management
+
+| Layer | Target Runtimes | State Style | Managed By | Path Context |
+| :--- | :--- | :--- | :--- | :--- |
+| **GUI Apps** | Browsers, Communication, Productivity | Sandboxed / Stateful | `flatpak` | `~/.var/app/` |
+| **CLI Tools** | Editor (Neovim), Terminal Multiplexer, Shell Utils | User-owned / Stateful | `brew` | `/home/linuxbrew/` |
+| **Dev Environments** | Compilers (GCC/Clang), Runtimes (Node/Python), SDKs | Ephemeral / Disposable | `distrobox` | Isolated containers / Shared `$HOME` |
+| **Base Host** | Display, Network, Hardware virtualization, Security | Locked / Minimal | Automated / `dnf-host` | `/`, `/usr`, `/etc` |
+
+---
+
+## 🔬 Why This Approach?
+
+Traditional Linux workstation setups inevitably suffer from **Operating System Decay**. Over months and years, conflicting global libraries, orphaned development packages, drifting systemd services, and mismatched interpreter versions (Python, Node) slowly degrade system stability and make disaster recovery nearly impossible.
+
+This setup resolves OS decay by enforcing a hybrid, layered model that offers the reliability of an immutable operating system with the uncompromised flexibility of standard Fedora Workstation.
 
 ### Why not Silverblue or Kinoite?
 
-Fedora Kinoite (the KDE variant of Silverblue) is a genuine atomic OS — the root filesystem is read-only, managed by `rpm-ostree`. It's excellent for stability but comes with trade-offs for a developer workstation:
+While genuine atomic systems are excellent, they present significant friction for active developer machines, particularly those relying on older hardware:
 
-- **NVIDIA legacy drivers are hard to pin.** `rpm-ostree` layering works for NVIDIA, but older GPUs (Pascal, Turing) that need the 580xx branch can break after OS rebases. Driver pinning is opaque compared to DNF versionlock.
-- **Flexibility is limited.** Every host package goes through `rpm-ostree install` (which layers on the base image) or a container. Custom COPRs, one-off RPMs, and debugging tools that need kernel headers become awkward.
-- **The immutability benefit is mostly irrelevant for a single personal machine.** The real value of immutable OSes is fleet consistency and atomic OS-level rollback — on a personal workstation, Snapper gives you per-transaction rollback that's arguably more granular.
-- **Tooling is the same either way.** Distrobox, Podman, Flatpak, and Homebrew work identically on Kinoite and on this setup. You don't lose any of the layered model by staying on Workstation.
-
-The conclusion: if you have a modern, well-supported GPU and prefer a stricter appliance-style workflow, Kinoite/Aurora/Bluefin is an excellent choice. If you have a legacy GPU, need specific host packages, or want a more familiar setup path, the immutable-*like* approach here gives you 90% of the benefits with far less friction.
+*   **The Legacy NVIDIA Bottleneck:** Atomic systems layer the NVIDIA driver on top of the base system image via `rpm-ostree`. While this works well for modern GPUs supported by the latest driver, Pascal and Turing cards requiring the legacy 580xx branch face high friction. Kernel upgrades often outpace legacy driver repository updates, causing silent build failures, broken boot states, or complex manual overrides. Staying on Workstation allows standard `akmod` to safely compile drivers locally at the time of update, completely controlled by local snapshots.
+*   **Granular Workstation Rollbacks:** Immutability's primary asset is atomic OS-level rollback. However, on a single personal workstation, **Snapper on Btrfs** provides *per-transaction* rollback. If a system update or configuration change breaks your desktop, you can boot into a pre-update snapshot from the GRUB menu or undo the exact DNF transaction with a single command. You gain 100% of the safety with none of the read-only filesystem restrictions.
+*   **Host Level Debugging & Virtualization:** Developers occasionally need to run low-level profilers (`perf`), system-call tracers (`strace`), system virtualization (`QEMU/KVM`), or kernel-header dependent debuggers. Layering these deep dependencies on `rpm-ostree` requires frequent host rebases and compromises the core value of the immutable image. A minimal, snapshot-protected host handles these tools natively with zero friction.
 
 ### Why Fedora KDE Workstation?
 
@@ -1927,13 +1991,13 @@ mount | grep /var/mount
 sudo journalctl -b -u 'var-mount-*' --no-pager   # if using systemd .mount units
 ```
 
+### GRUB Menu Visibility
 
+By default Fedora sets `menu_auto_hide=1` in the GRUB environment, which causes the boot menu to be silently skipped after a successful boot. This prevents you from selecting Snapper snapshots or alternate kernels at boot time.
 
+#### Root cause
 
-
-
-
-The issue is the **auto-hide** behavior. Your `grub.cfg` contains this logic:
+`grub.cfg` contains an auto-hide block that checks the stored variable:
 
 ```
 elif [ "${menu_auto_hide}" -a "${menu_hide_ok}" = "1" ]; then
@@ -1941,41 +2005,45 @@ elif [ "${menu_auto_hide}" -a "${menu_hide_ok}" = "1" ]; then
   set timeout=1
 ```
 
-Since your last boot was successful (`boot_success=1`), GRUB hides the menu automatically. You never see it.
+When `menu_auto_hide=1` is present in `/boot/grub2/grubenv`, the menu is hidden even if `GRUB_TIMEOUT` is set to a high value.
 
-**Fix: add `GRUB_TIMEOUT_STYLE=menu` to `/etc/default/grub`**, then regenerate:
+#### Fix 1 — Remove `menu_auto_hide` from grubenv (required)
+
+```bash
+# Check current variables
+sudo grub2-editenv /boot/grub2/grubenv list
+
+# Remove the auto-hide flag
+sudo grub2-editenv /boot/grub2/grubenv unset menu_auto_hide
+
+# Verify it is gone
+sudo grub2-editenv /boot/grub2/grubenv list
+```
+
+After this, the menu will appear on the next boot.
+
+#### Fix 2 — Force menu style permanently (recommended)
+
+To ensure the menu is always shown regardless of boot success/failure state, add `GRUB_TIMEOUT_STYLE=menu` to `/etc/default/grub` and regenerate:
 
 ```bash
 # Edit the file
 sudo nano /etc/default/grub
 ```
 
-Add/change this line:
+Add or change this line:
+
 ```
 GRUB_TIMEOUT_STYLE=menu
 ```
 
 Then regenerate the config:
+
 ```bash
 sudo grub2-mkconfig -o /boot/grub2/grub.cfg
 ```
 
-This forces the menu to always show (for the 15 seconds you already have set in `GRUB_TIMEOUT=15`), regardless of whether the last boot succeeded.
+This forces the menu to always show (for the duration set in `GRUB_TIMEOUT=15`), regardless of whether the last boot succeeded.
 
----
+> **Tip:** If you prefer the menu to stay hidden on normal boots, you can skip Fix 2 and instead hold **Esc** or **Shift** during boot to interrupt the hidden timeout. But since snapshot-based rollback requires regular access to the GRUB menu, applying both fixes is the cleaner approach.
 
-**Alternatively**, if you don't want to always see the menu on every boot, you can just **hold `Esc` or `Shift`** during boot to interrupt the hidden timeout and force the menu to appear. But since you want to access snapshots regularly, the explicit `GRUB_TIMEOUT_STYLE=menu` is the cleaner solution.
-
-
-➜  ~ sudo grub2-editenv /boot/grub2/grubenv list
-[sudo] password for blgnksy: 
-saved_entry=b450c693d94c41dab9d9c96e73ffa7cf-7.0.9-205.fc44.x86_64
-menu_auto_hide=1
-boot_success=0
-boot_indeterminate=0
-➜  ~ sudo grub2-editenv /boot/grub2/grubenv unset menu_auto_hide
-➜  ~ sudo grub2-editenv /boot/grub2/grubenv list                
-saved_entry=b450c693d94c41dab9d9c96e73ffa7cf-7.0.9-205.fc44.x86_64
-boot_success=0
-boot_indeterminate=0
-➜  ~ 
