@@ -4,7 +4,7 @@
 
 ---
 
-## 🎯 The Goal
+## The Goal
 
 To establish a highly optimized, high-performance developer workstation using **Fedora KDE Plasma Desktop** and an **NVIDIA GPU (Pascal Architecture / GTX 1070)** that behaves as close to a modern atomic/immutable operating system as possible. 
 
@@ -25,7 +25,7 @@ graph TD
 
 ---
 
-## 🧠 The Mental Model
+## The Mental Model
 
 This system is built as a **snapshot-backed minimal host**, offering a robust alternative to fully immutable operating systems (such as Fedora Silverblue or Kinoite). Instead of enforcing a read-only filesystem via hardware or kernel blocks, we establish a **disciplined layer separation** reinforced by tooling and user habit.
 
@@ -69,7 +69,7 @@ graph TB
 
 ---
 
-## 🔬 Why This Approach?
+## Why This Approach?
 
 Traditional Linux workstation setups inevitably suffer from **Operating System Decay**. Over months and years, conflicting global libraries, orphaned development packages, drifting systemd services, and mismatched interpreter versions (Python, Node) slowly degrade system stability and make disaster recovery nearly impossible.
 
