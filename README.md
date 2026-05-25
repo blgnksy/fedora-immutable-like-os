@@ -997,7 +997,9 @@ From here on, **avoid `dnf` for user-space tools** (Phase 6 adds a guard). Homeb
   - Extensions install in the background; takes a few minutes for a large set
   - Alternative (manual): export extension list via `code --list-extensions > vscode-extensions.txt`, restore with `xargs -L1 code --install-extension < vscode-extensions.txt`. Worth saving the list in your dotfiles repo regardless, as a fallback.
 
-- [ ] (Optional) Other useful casks from the ublue tap:
+- [ ] (Optional) Other useful casks from the ublue tap
+  > **Make:** `make phase3-brew-casks-optional`:
+
   ```bash
   brew install --cask jetbrains-toolbox-linux    # CLion, IntelliJ, PyCharm, etc.
   brew install --cask 1password-gui-linux        # Password manager
@@ -1076,7 +1078,7 @@ flatpak install -y flathub com.vivaldi.Vivaldi
 flatpak install -y flathub org.mozilla.firefox
 ```
 
-**Proton suite:**
+**Proton suite (Optional):**
 ```bash
 flatpak install -y flathub ch.protonmail.protonmail.bridge
 flatpak install -y flathub com.protonvpn.www
@@ -1958,7 +1960,7 @@ mount | grep /var/mount
 sudo journalctl -b -u 'var-mount-*' --no-pager   # if using systemd .mount units
 ```
 
-### GRUB Menu Visibility
+## Appendix D: GRUB Menu Visibility
 
 By default Fedora sets `menu_auto_hide=1` in the GRUB environment, which causes the boot menu to be silently skipped after a successful boot. This prevents you from selecting Snapper snapshots or alternate kernels at boot time.
 
@@ -2013,4 +2015,3 @@ sudo grub2-mkconfig -o /boot/grub2/grub.cfg
 This forces the menu to always show (for the duration set in `GRUB_TIMEOUT=15`), regardless of whether the last boot succeeded.
 
 > **Tip:** If you prefer the menu to stay hidden on normal boots, you can skip Fix 2 and instead hold **Esc** or **Shift** during boot to interrupt the hidden timeout. But since snapshot-based rollback requires regular access to the GRUB menu, applying both fixes is the cleaner approach.
-

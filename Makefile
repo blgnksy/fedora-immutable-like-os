@@ -381,7 +381,7 @@ brew-update: ## brew update && upgrade
 	@eval "$$($(BREW) shellenv 2>/dev/null || true)" && brew update && brew upgrade
 
 distrobox-update: ## distrobox upgrade --all
-	@command -v distrobox >/dev/null && distrobox upgrade --all --yes || true
+	@command -v distrobox >/dev/null && distrobox upgrade --all || true
 
 update-host: ## Host dnf upgrade + refresh-gpu
 	$(DNF) upgrade --refresh -y
