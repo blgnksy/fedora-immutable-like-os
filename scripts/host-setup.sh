@@ -107,6 +107,7 @@ if should_run 4; then
     make -C "$SETUP_DIR" \
         phase4-flathub \
         phase4-flatpak-apps \
+        phase4-flatpak-ffmpeg \
         phase4-plasma-widgets \
         phase4-virt \
         phase4-crypto \
