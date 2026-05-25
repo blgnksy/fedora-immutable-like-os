@@ -166,7 +166,7 @@ make help         # day-2 maintenance (update, health, snapper, …)
 make <target>     # from any directory
 
 # Optional shell alias (~/.zshrc):
-# alias ws='make '
+# alias ws='make -C ~/setup'
 ```
 
 | Phase | Aggregate target | Verify (after phase) |
@@ -1595,25 +1595,15 @@ Chezmoi covers config-as-code. Other things need their own backup strategy:
   brew bundle install --file=~/Brewfile
   ```
 
-- [ ] Document your one-time `dnf` setup in a `host-setup.sh` script:
+- [ ] The orchestration script `~/setup/scripts/host-setup.sh` runs all phases 1–6 in order. Add it to chezmoi so a fresh install starts with:
   ```bash
-  #!/bin/bash
-  # host-setup.sh — Run once after fresh Fedora KDE install
-  # 1. DNF speed tweaks (fastestmirror, max_parallel_downloads, defaultyes, keepcache)
-  # 2. SSH server (sshd + firewalld + hardened config + optional fail2ban)
-  # 3. Debugging tools (gdb, gdbserver, strace, ltrace, perf, valgrind)
-  # 4. NVIDIA 580xx driver (with versionlock) + suspend/resume services
-  # 5. nvidia-container-toolkit + CDI spec generation
-  # 6. RPM Fusion media codecs (ffmpeg, GStreamer, libva-nvidia-driver)
-  # 7. Snapper + grub-btrfs (build from Antynea git — COPR lacks grub-btrfsd on F44)
-  # 8. dnf5-plugin-automatic for security updates (apply_updates=yes, reboot=never)
-  # 9. (Optional) Docker for Swarm work
-  # 10. KDE crypto tools (gnupg2, kgpg, kleopatra, pinentry-qt, kwalletmanager5)
-  # 11. PDF signing tools (okular, nss-tools, poppler-utils)
-  # 12. (Optional) Smartcard support (pcsc-lite, opensc)
-  # 13. Virtualization (qemu-kvm, libvirt, virt-manager, edk2-ovmf, swtpm)
-  # Keep this script in your dotfiles repo.
+  # Run all phases 1–6 in one shot
+  bash ~/setup/scripts/host-setup.sh
+
+  # Or resume from a specific phase (if a previous run was interrupted)
+  bash ~/setup/scripts/host-setup.sh --from 3b
   ```
+  > **Make:** `make phase7-host-setup` (marks the script executable)
 
 ---
 
@@ -1714,6 +1704,7 @@ Routine maintenance after the initial setup. Prefer **`~/setup/Makefile`** — r
 | `clean` | brew cleanup + podman prune + snapper cleanup |
 | `mounts` | verify `/var/mount` + no `noexec` on Projects |
 | `phase7-brewfile-dump` | save `~/Brewfile` |
+| `phase7-verify` | verify Brewfile + host-setup.sh executable |
 | `phase0-verify` … `phase6-verify` | post-phase checks (`scripts/verify.sh`) |
 | `phase1-verify-gpu` | NVIDIA + VA-API + podman GPU (after reboot) |
 | `verify-all` | all phase checks in one run |
