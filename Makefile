@@ -19,13 +19,13 @@ BREW := $(shell test -x /home/linuxbrew/.linuxbrew/bin/brew && echo /home/linuxb
 	phase1-all phase1-dnf-tweaks phase1-upgrade phase1-ssh phase1-fail2ban \
 	phase1-debug phase1-perf phase1-rpmfusion phase1-nvidia phase1-nvidia-suspend \
 	phase1-nvidia-toolkit phase1-podman phase1-cdi phase1-refresh-cdi-script \
-	phase1-codecs phase1-vaapi phase1-flatpak-ffmpeg \
+	phase1-codecs phase1-vaapi \
 	phase2-all phase2-snapper phase2-snapper-timers phase2-snapper-retention \
 	phase2-grub-btrfs phase2-grub-test \
-	phase3-brew-deps phase3-brew-cli phase3-brew-tap phase3-brew-casks \
-	phase4-flathub phase4-flatpak-apps phase4-flatpak-xdg phase4-plasma-widgets phase4-virt \
+	phase3-brew-deps phase3-brew-cli phase3-brew-tap phase3-brew-casks-optional \
+	phase4-flathub phase4-flatpak-apps phase4-flatpak-ffmpeg phase4-flatpak-xdg phase4-plasma-widgets phase4-virt \
 	phase4-crypto phase4-okular phase4-smartcard \
-	phase5-distrobox-config phase5-distrobox-dev phase5-distrobox-deepstream \
+	phase5-distrobox-config phase5-distrobox-dev \
 	phase6-dnf-automatic phase6-nvidia-versionlock phase6-dnf-guard \
 	phase7-brewfile-dump phase7-all phase7-host-setup phase7-verify \
 	update update-host health status clean mounts \
@@ -238,9 +238,6 @@ phase1-codecs: ## ffmpeg swap + gstreamer plugins
 phase1-vaapi: ## NVIDIA VA-API
 	$(DNF) install -y libva-nvidia-driver libva-utils
 
-phase1-flatpak-ffmpeg: ## Flatpak ffmpeg runtime
-	flatpak install -y flathub org.freedesktop.Platform.ffmpeg-full//24.08 || true
-
 # --- Phase 2 ---
 
 phase2-all: phase2-snapper phase2-snapper-retention phase2-snapper-timers phase2-grub-btrfs phase2-grub-test
@@ -292,6 +289,9 @@ phase4-flatpak-apps: phase4-flathub ## Recommended flatpak set
 	flatpak install -y flathub net.cozic.joplindesktop org.collabora.Office com.nextcloud.desktopclient.nextcloud || true
 	flatpak install -y flathub org.videolan.VLC io.dbeaver.DBeaverCommunity org.localsend.localsend_app io.github.maniacx.BudsLink || true
 
+phase4-flatpak-ffmpeg: ## Flatpak ffmpeg runtime (for apps that don't bundle their own)
+	flatpak install -y flathub org.freedesktop.Platform.ffmpeg-full//24.08 || true
+
 phase4-plasma-widgets: ## Install KDE Plasma widgets (BudsLink, etc.)
 	@echo "Installing BudsLink Plasma Widget..."
 	@tmpdir=$$(mktemp -d) && \
@@ -339,10 +339,6 @@ phase5-distrobox-config: ## /var/mount bind in distrobox.conf
 
 phase5-distrobox-dev: ## Create dev container (install packages inside manually)
 	distrobox create --name dev --image registry.fedoraproject.org/fedora-toolbox:44 -Y || true
-
-phase5-distrobox-deepstream: ## Create ubuntu deepstream container
-	distrobox create --name deepstream --image ubuntu:22.04 \
-		--additional-packages "build-essential cmake python3 python3-pip" -Y || true
 
 # --- Phase 6 ---
 
@@ -406,8 +402,8 @@ snapper-undo: ## snapper undochange (PRE=1 POST=2)
 	snapper undochange $(PRE)..$(POST)
 
 refresh-gpu: ## Regenerate CDI spec
-	@command -v refresh-cdi >/dev/null || { echo "Run: make phase1-refresh-cdi-script"; exit 1; }
-	~/.local/bin/refresh-cdi
+	@test -x "$(HOME)/.local/bin/refresh-cdi" || { echo "Run: make phase1-refresh-cdi-script"; exit 1; }
+	$(HOME)/.local/bin/refresh-cdi
 
 gpu-test: ## Rootless podman GPU smoke test
 	podman run --rm --device nvidia.com/gpu=all --security-opt=label=disable \
